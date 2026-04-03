@@ -39,13 +39,6 @@ async def lifespan(app: FastAPI):
     _configure_logging()
     logger = logging.getLogger(__name__)
 
-    if settings.ENVIRONMENT.lower() != "test":
-        try:
-            NEREngine.initialize()
-            SentimentEngine.initialize()
-        except Exception as exc:
-            logger.error("Failed to initialize ML models: %s. Some features may be unavailable.", exc)
-
     cache = CacheService()
     await cache.connect()
 
@@ -63,7 +56,7 @@ async def lifespan(app: FastAPI):
         set_pipeline_instance(pipeline)
     app.state.models_loaded = True
 
-    logger.info("All models loaded successfully")
+    logger.info("Application startup complete")
     yield
     logger.info("Shutting down")
 

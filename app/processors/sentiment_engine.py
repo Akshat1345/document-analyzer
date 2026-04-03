@@ -17,6 +17,8 @@ class SentimentEngine:
     _finbert: Any = None
     _roberta: Any = None
     _vader: Any = None
+    _initialized = False
+    _lock = None
 
     WEIGHTS = {
         "invoice": {"finbert": 0.6, "roberta": 0.2, "vader": 0.2},
@@ -35,35 +37,56 @@ class SentimentEngine:
     def initialize(cls) -> None:
         """Load sentiment models once at startup with graceful fallbacks."""
 
-        try:
-            cls._finbert = pipeline(
-                "sentiment-analysis",
-                model="ProsusAI/finbert",
-                return_all_scores=True,
-            )
-        except Exception as exc:
-            logger.warning("Failed to load FinBERT: %s", exc)
-            cls._finbert = None
+        cls._ensure_initialized()
 
-        try:
-            cls._roberta = pipeline(
-                "sentiment-analysis",
-                model="cardiffnlp/twitter-roberta-base-sentiment-latest",
-                return_all_scores=True,
-            )
-        except Exception as exc:
-            logger.warning("Failed to load RoBERTa: %s", exc)
-            cls._roberta = None
+    @classmethod
+    def _ensure_initialized(cls) -> None:
+        """Load sentiment models lazily and only once."""
 
-        try:
-            cls._vader = SentimentIntensityAnalyzer()
-        except Exception as exc:
-            logger.warning("Failed to load VADER: %s", exc)
-            cls._vader = None
+        if cls._initialized:
+            return
+
+        if cls._lock is None:
+            from threading import Lock
+
+            cls._lock = Lock()
+
+        with cls._lock:
+            if cls._initialized:
+                return
+
+            try:
+                cls._finbert = pipeline(
+                    "sentiment-analysis",
+                    model="ProsusAI/finbert",
+                    return_all_scores=True,
+                )
+            except Exception as exc:
+                logger.warning("Failed to load FinBERT: %s", exc)
+                cls._finbert = None
+
+            try:
+                cls._roberta = pipeline(
+                    "sentiment-analysis",
+                    model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+                    return_all_scores=True,
+                )
+            except Exception as exc:
+                logger.warning("Failed to load RoBERTa: %s", exc)
+                cls._roberta = None
+
+            try:
+                cls._vader = SentimentIntensityAnalyzer()
+            except Exception as exc:
+                logger.warning("Failed to load VADER: %s", exc)
+                cls._vader = None
+
+            cls._initialized = True
 
     def _run_finbert(self, text: str) -> dict[str, float]:
         """Run FinBERT and return normalized score dictionary."""
 
+        self._ensure_initialized()
         if self._finbert is None:
             return {"positive": 0.0, "neutral": 1.0, "negative": 0.0}
         raw_scores: Any = self._finbert(text[:512])
@@ -76,6 +99,7 @@ class SentimentEngine:
     def _run_roberta(self, text: str) -> dict[str, float]:
         """Run RoBERTa and map label IDs to sentiment names."""
 
+        self._ensure_initialized()
         if self._roberta is None:
             return {"positive": 0.0, "neutral": 1.0, "negative": 0.0}
         raw_scores: Any = self._roberta(text[:512])
@@ -89,6 +113,7 @@ class SentimentEngine:
     def _run_vader(self, text: str) -> dict[str, float | str]:
         """Run VADER and return per-label scores plus coarse label."""
 
+        self._ensure_initialized()
         if self._vader is None:
             return {"positive": 0.0, "neutral": 1.0, "negative": 0.0, "label": "neutral"}
         scores = self._vader.polarity_scores(text[:1000])
