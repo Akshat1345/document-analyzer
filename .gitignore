@@ -54,4 +54,7 @@ uploads/
 test_files/
 
 !app/models/
-!app/models/**
+!app/models/__init__.py
+!app/models/schemas.py
+
+test/
