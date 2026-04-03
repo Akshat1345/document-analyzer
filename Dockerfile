@@ -1,5 +1,12 @@
 FROM python:3.11-slim
 
+# Reduce image size by disabling pip cache, torch cache, and huggingface cache during build
+ENV PIP_NO_CACHE_DIR=1 \
+    TORCH_HOME=/tmp/torch \
+    HF_HOME=/tmp/hf \
+    TRANSFORMERS_CACHE=/tmp/hf \
+    HUGGINGFACE_HUB_CACHE=/tmp/hf
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -11,8 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m spacy download en_core_web_sm
+RUN pip install --no-cache-dir -r requirements.txt && \
+    rm -rf /root/.cache /tmp/torch /tmp/hf ~/.cache/pip && \
+    find /usr/local -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+RUN python -m spacy download en_core_web_sm && \
+    rm -rf /root/.cache /tmp/torch /tmp/hf ~/.cache/pip && \
+    find /usr/local -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 COPY . .
 EXPOSE 8000
