@@ -1,0 +1,54 @@
+# Secrets - NEVER commit the real .env
+.env
+.env.local
+.env.production
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# ML model cache - never commit, huge files
+.cache/
+models/
+*.bin
+*.safetensors
+*.pt
+*.pth
+transformers_cache/
+huggingface/
+.EasyOCR/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Test artifacts and uploaded documents
+.pytest_cache/
+test_outputs/
+uploads/
+test_files/
