@@ -52,3 +52,6 @@ frontend/.env.local
 test_outputs/
 uploads/
 test_files/
+
+!app/models/
+!app/models/**
