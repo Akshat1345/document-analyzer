@@ -244,7 +244,9 @@ export default function Page() {
                   <h4>Answer</h4>
                   <p>{qaResult.answer}</p>
                   {qaResult.citations.length > 0 && (
-                    <p className="footnote">Sources: {qaResult.citations.join(", ")}</p>
+                    <p className="footnote">
+                      Sources: {qaResult.citations.join(", ")}
+                    </p>
                   )}
                 </div>
               )}
@@ -254,7 +256,8 @@ export default function Page() {
             <section className="card qa-card">
               <h3>Ask Questions About This Document</h3>
               <p className="qa-error">
-                Document ID missing in response. Please re-run Analyze once to enable document-scoped Q&amp;A.
+                Document ID missing in response. Please re-run Analyze once to
+                enable document-scoped Q&amp;A.
               </p>
             </section>
           )}

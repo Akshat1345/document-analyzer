@@ -24,9 +24,21 @@ body {
   font-family: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at 10% 20%, rgba(57, 196, 215, 0.2), transparent 32%),
-    radial-gradient(circle at 88% 8%, rgba(240, 162, 92, 0.16), transparent 30%),
-    radial-gradient(circle at 72% 86%, rgba(73, 210, 140, 0.14), transparent 28%),
+    radial-gradient(
+      circle at 10% 20%,
+      rgba(57, 196, 215, 0.2),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 88% 8%,
+      rgba(240, 162, 92, 0.16),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 72% 86%,
+      rgba(73, 210, 140, 0.14),
+      transparent 28%
+    ),
     linear-gradient(145deg, #07131f 0%, #0a2235 45%, #081526 100%);
   letter-spacing: 0.01em;
 }
@@ -57,7 +69,11 @@ body::before {
   padding: 1.35rem 1.55rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(130deg, rgba(8, 28, 45, 0.84), rgba(10, 35, 58, 0.75));
+  background: linear-gradient(
+    130deg,
+    rgba(8, 28, 45, 0.84),
+    rgba(10, 35, 58, 0.75)
+  );
   backdrop-filter: blur(8px);
   box-shadow: var(--shadow);
   animation: reveal 550ms ease;
@@ -69,7 +85,11 @@ body::before {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(105deg, rgba(57, 196, 215, 0.08), rgba(240, 162, 92, 0.05));
+  background: linear-gradient(
+    105deg,
+    rgba(57, 196, 215, 0.08),
+    rgba(240, 162, 92, 0.05)
+  );
 }
 
 .hero h1 {
@@ -92,7 +112,11 @@ body::before {
   position: relative;
   border: 1.5px dashed rgba(128, 177, 201, 0.7);
   border-radius: var(--radius);
-  background: linear-gradient(160deg, rgba(9, 30, 47, 0.85), rgba(9, 24, 39, 0.8));
+  background: linear-gradient(
+    160deg,
+    rgba(9, 30, 47, 0.85),
+    rgba(9, 24, 39, 0.8)
+  );
   padding: 2.1rem;
   cursor: pointer;
   transition:
@@ -176,7 +200,11 @@ body::before {
 .error-banner {
   margin-top: 1rem;
   border: 1px solid rgba(241, 115, 111, 0.7);
-  background: linear-gradient(145deg, rgba(74, 24, 28, 0.7), rgba(47, 17, 22, 0.64));
+  background: linear-gradient(
+    145deg,
+    rgba(74, 24, 28, 0.7),
+    rgba(47, 17, 22, 0.64)
+  );
   border-radius: 12px;
   padding: 1rem;
 }
@@ -222,7 +250,11 @@ body::before {
   left: 0;
   width: 100%;
   height: 2px;
-  background: linear-gradient(90deg, rgba(57, 196, 215, 0.85), rgba(240, 162, 92, 0.65));
+  background: linear-gradient(
+    90deg,
+    rgba(57, 196, 215, 0.85),
+    rgba(240, 162, 92, 0.65)
+  );
 }
 
 .card h3 {
@@ -313,13 +345,25 @@ body::before {
 }
 
 .sentiment.positive {
-  background: linear-gradient(160deg, rgba(53, 168, 118, 0.23), rgba(39, 108, 82, 0.26));
+  background: linear-gradient(
+    160deg,
+    rgba(53, 168, 118, 0.23),
+    rgba(39, 108, 82, 0.26)
+  );
 }
 .sentiment.neutral {
-  background: linear-gradient(160deg, rgba(123, 147, 170, 0.24), rgba(72, 95, 122, 0.28));
+  background: linear-gradient(
+    160deg,
+    rgba(123, 147, 170, 0.24),
+    rgba(72, 95, 122, 0.28)
+  );
 }
 .sentiment.negative {
-  background: linear-gradient(160deg, rgba(197, 84, 92, 0.24), rgba(116, 45, 54, 0.28));
+  background: linear-gradient(
+    160deg,
+    rgba(197, 84, 92, 0.24),
+    rgba(116, 45, 54, 0.28)
+  );
 }
 
 .emoji {
