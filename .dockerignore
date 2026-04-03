@@ -38,3 +38,11 @@ huggingface/
 # Test fixtures / uploads
 uploads/
 test_files/
+tests/
+test/
+eval/
+frontend/
+.git/
+setup_git.sh
+run_sample_test.py
+inspect_entities.py
