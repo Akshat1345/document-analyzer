@@ -1,0 +1,35 @@
+[
+  {
+    "fileName": "sample1-Technology_Industry_Analysis.pdf",
+    "fileType": "pdf",
+    "expected_sentiment": "Positive",
+    "expected_entities": {
+      "names": [],
+      "dates": [],
+      "organizations": ["Google", "Microsoft", "NVIDIA"],
+      "amounts": []
+    }
+  },
+  {
+    "fileName": "sample2-Cybersecurity_Incident_Report.docx",
+    "fileType": "docx",
+    "expected_sentiment": "Negative",
+    "expected_entities": {
+      "names": [],
+      "dates": [],
+      "organizations": [],
+      "amounts": []
+    }
+  },
+  {
+    "fileName": "sample3.jpg",
+    "fileType": "image",
+    "expected_sentiment": "Positive",
+    "expected_entities": {
+      "names": ["Nina Lane"],
+      "dates": ["June 2020", "March 2017", "May 2020", "2017"],
+      "organizations": ["Brightline Agency", "Blue Horizon Media", "Parsons School of Design"],
+      "amounts": []
+    }
+  }
+]
