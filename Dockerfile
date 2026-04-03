@@ -12,21 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-RUN python -m spacy download en_core_web_trf
-
-RUN python - <<'PY' 2>/dev/null
-from transformers import pipeline
-from gliner import GLiNER
-import easyocr
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-
-pipeline('sentiment-analysis', model='ProsusAI/finbert', return_all_scores=True)
-pipeline('sentiment-analysis', model='cardiffnlp/twitter-roberta-base-sentiment-latest', return_all_scores=True)
-GLiNER.from_pretrained('urchade/gliner_mediumv2.1')
-easyocr.Reader(['en'], gpu=False)
-SentimentIntensityAnalyzer()
-PY
+RUN python -m spacy download en_core_web_sm
 
 COPY . .
 EXPOSE 8000

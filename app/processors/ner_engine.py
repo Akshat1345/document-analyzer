@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import logging
+import threading
 from collections import defaultdict
 
 import spacy
@@ -92,27 +93,46 @@ class NEREngine:
 
     _spacy_model = None
     _gliner_model = None
+    _lock = threading.Lock()
 
     @classmethod
     def initialize(cls) -> None:
         """Load NER models once at startup."""
 
-        try:
-            cls._spacy_model = spacy.load("en_core_web_trf")
-        except Exception as exc:
-            logger.warning("Failed to load spaCy model: %s", exc)
-            cls._spacy_model = None
-        try:
-            cls._gliner_model = GLiNER.from_pretrained("urchade/gliner_mediumv2.1")
-        except Exception as exc:
-            logger.warning("Failed to load GLiNER model: %s", exc)
-            cls._gliner_model = None
+        cls._ensure_initialized()
+
+    @classmethod
+    def _ensure_initialized(cls) -> None:
+        """Load NER models lazily and only once."""
+
+        if cls._spacy_model is not None and cls._gliner_model is not None:
+            return
+
+        with cls._lock:
+            if cls._spacy_model is None:
+                try:
+                    cls._spacy_model = spacy.load("en_core_web_trf")
+                except Exception as exc:
+                    logger.warning("Failed to load spaCy transformer model: %s", exc)
+                    try:
+                        cls._spacy_model = spacy.load("en_core_web_sm")
+                    except Exception as fallback_exc:
+                        logger.warning("Failed to load spaCy small model: %s", fallback_exc)
+                        cls._spacy_model = None
+
+            if cls._gliner_model is None:
+                try:
+                    cls._gliner_model = GLiNER.from_pretrained("urchade/gliner_mediumv2.1")
+                except Exception as exc:
+                    logger.warning("Failed to load GLiNER model: %s", exc)
+                    cls._gliner_model = None
 
     def _extract_spacy(self, text: str) -> dict[str, list[str]]:
         """Extract entities from spaCy layer and map into API schema buckets."""
 
         out = {"names": [], "dates": [], "organizations": [], "amounts": [], "emails": [], "phones": []}
         try:
+            self._ensure_initialized()
             if self._spacy_model is None:
                 return out
             doc = self._spacy_model(text[:5000])
@@ -143,6 +163,7 @@ class NEREngine:
             "government agency",
         ]
         try:
+            self._ensure_initialized()
             if self._gliner_model is None:
                 return out
             entities = self._gliner_model.predict_entities(text[:5000], labels, threshold=0.5)
