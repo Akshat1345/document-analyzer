@@ -1,0 +1,40 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets and local env
+.env
+frontend/.env.local
+
+# Node / frontend builds
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Model/cache/data directories
+.cache/
+models/
+transformers_cache/
+huggingface/
+
+# Large binary artifacts
+*.bin
+*.safetensors
+*.pt
+*.pth
+
+# VCS and editor files
+.git/
+.vscode/
+.idea/
+.DS_Store
+
+# Test fixtures / uploads
+uploads/
+test_files/
