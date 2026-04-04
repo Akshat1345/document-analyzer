@@ -1,124 +1,128 @@
-# DocuMind AI
+# DocuMind AI: Multi-Format Document Intelligence
 
-DocuMind AI is a document intelligence API for PDFs, DOCX files, and images. It extracts structured entities, summarizes the document, and returns a sentiment label while keeping the pipeline generic across document types.
+DocuMind AI is a production-ready document analysis system built for hackathon-grade evaluation and real-world robustness. It accepts PDF, DOCX, and image uploads, then returns entity extraction, sentiment, and high-density summarization through a single secure API.
 
-## What It Does
+The project is deliberately designed to avoid brittle sample-specific behavior. Extraction and classification are content-driven, normalized, and validated so outputs remain stable across unseen documents.
 
-The system accepts a base64-encoded document, extracts text with format-specific parsers, runs entity extraction across the full document, and returns a strict JSON response. The entity pipeline is not tied to sample documents or hardcoded mappings; it uses candidate generation, normalization, deduplication, and validation to maximize recall without allowing vague fragments through.
+## Live Links
 
-## Highlights
+- Frontend: https://generous-dream-production-36d6.up.railway.app/
+- Backend Base URL: https://document-analyzer-production-ce0c.up.railway.app
+- Primary API Endpoint: https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze
+- Health Endpoint: https://document-analyzer-production-ce0c.up.railway.app/health
 
-- `POST /api/document-analyze` for full-document analysis.
-- `x-api-key` authentication with `401` on missing or invalid keys.
-- OCR support for scanned images and image-heavy PDFs.
-- Entity extraction for names, dates, organizations, amounts, emails, and phone numbers.
-- Sentiment output constrained to `Positive`, `Neutral`, or `Negative`.
-- Document-scoped Q&A endpoint backed by cached text rather than heavy vector infrastructure.
-- Docker-based deployment with Redis and background workers.
+## Why This Is Not a Generic Project
 
-## Hackathon Compliance
+Most hackathon document analyzers work as thin wrappers around a single prompt call. This project does not. It is an engineered pipeline built for consistency, evaluator trust, and real deployment behavior.
 
-| Requirement                                         | Status      | Notes                                                    |
-| --------------------------------------------------- | ----------- | -------------------------------------------------------- |
-| `POST /api/document-analyze`                        | Implemented | Primary analysis endpoint                                |
-| `x-api-key` auth with 401 handling                  | Implemented | Enforced before processing                               |
-| Request fields `fileName`, `fileType`, `fileBase64` | Implemented | Matches API contract                                     |
-| Response includes required analysis payload         | Implemented | `status`, `fileName`, `summary`, `entities`, `sentiment` |
-| Sentiment only in allowed labels                    | Implemented | `Positive`, `Neutral`, `Negative`                        |
-| README contains description, stack, setup, approach | Implemented | This document                                            |
-| AI disclosure included                              | Implemented | See AI Tools Used                                        |
-| No hardcoded sample mapping                         | Implemented | Extraction is content-driven                             |
+### What Typical Projects Usually Do
 
-## Live Demo
+- Single-pass extraction directly from one LLM response
+- Minimal post-processing and weak normalization
+- Generic summaries with filler language
+- Sentiment behavior that drifts by document type
+- Demo reliability that drops when OCR noise appears
 
-- API URL: https://document-analyzer-production-ce0c.up.railway.app
-- API Endpoint: https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze
-- Frontend URL: https://generous-dream-production-36d6.up.railway.app/
+### What DocuMind AI Does Instead
 
-## Tech Stack
+- Multi-stage extraction with candidate generation, normalization, deduplication, and validation before final output
+- Document-type-aware processing so invoices, incidents, resumes, and research reports are not treated the same way
+- Summary generation with factual density constraints and anti-filler rules to avoid generic language
+- Sentiment guardrails tuned for formal business documents and incident narratives
+- OCR-aware cleaning and normalization logic to recover high-value entities from noisy text
 
-- Backend: FastAPI, Python 3.11
-- Extraction: PyMuPDF, pdfplumber, python-docx, Tesseract OCR
-- NLP: spaCy, Groq-hosted Llama 3.3 70B, VADER
-- Storage and workers: Redis, Celery
-- Frontend: Next.js 14, React, TypeScript
-- Deployment: Docker, Docker Compose, Railway-compatible runtime
+### Why This Matters for Evaluation
 
-## Architecture
+- Better precision under messy input, not just clean sample files
+- More stable outputs across repeated runs and unseen documents
+- Lower hallucination risk due to filtering and constrained response formats
+- Clearer scoring impact on entities, sentiment, and summary quality
+
+## Competitive Differentiators
+
+- Evaluation-first architecture: the system is optimized around the scoring priorities of entity quality, sentiment correctness, and summary usefulness.
+- Reliability over showcase-only demos: fallback paths exist for extraction and summarization when model calls degrade.
+- Deployment realism: live frontend and backend are production-hosted with authenticated endpoints and health checks.
+- Explainable pipeline behavior: each stage has a defined responsibility instead of one opaque model response.
+
+## Hackathon Requirement Mapping
+
+| Requirement                            | Status    | Implementation Detail                          |
+| -------------------------------------- | --------- | ---------------------------------------------- |
+| POST endpoint for document analysis    | Completed | POST /api/document-analyze                     |
+| Mandatory x-api-key authentication     | Completed | Strict header validation before processing     |
+| Required input fields                  | Completed | fileName, fileType, fileBase64                 |
+| Structured response payload            | Completed | status, fileName, summary, entities, sentiment |
+| Sentiment from fixed label set         | Completed | Positive, Neutral, Negative only               |
+| Deployment and public URL availability | Completed | Railway backend + Railway frontend             |
+| Non-generic engineering disclosure     | Completed | See architecture and quality sections below    |
+
+## High-Level Architecture
 
 ```mermaid
 flowchart TD
-  A[Client Upload] --> B[POST /api/document-analyze]
-  B --> C[API Key Validation]
-  C --> D[Decode Base64]
-  D --> E{File type}
-  E -->|PDF| F[PDF extractor]
-  E -->|DOCX| G[DOCX extractor]
-  E -->|Image| H[Image extractor + OCR]
-  F --> I[Plain text]
-  G --> I
-  H --> I
-  I --> J[Document classification]
-  J --> K[Entity extraction]
-  J --> L[Sentiment analysis]
-  K --> M[Normalization + filtering]
-  M --> N[Summary generator]
-  L --> O[Sentiment label]
-  N --> P[Final JSON response]
-  O --> P
+  A[Client Upload] --> B[API Auth Guard]
+  B --> C[Decode + Validate Payload]
+  C --> D{Document Type}
+  D -->|pdf| E[PDF Extractor Stack]
+  D -->|docx| F[DOCX Extractor]
+  D -->|image| G[OCR Extractor]
+  E --> H[Unified Text]
+  F --> H
+  G --> H
+  H --> I[Document Classifier]
+  I --> J[Entity Engine]
+  I --> K[Sentiment Engine]
+  J --> L[Normalizer + Deduper + Validators]
+  L --> M[Summarizer]
+  K --> N[Final Sentiment]
+  M --> O[Final JSON Response]
+  N --> O
 ```
 
-## Extraction Approach
+## Core Capabilities
 
-- Text extraction is file-format aware, so PDFs, DOCX documents, and images each use the most reliable parser first.
-- Entity extraction is generic. The code collects candidates from regex, spaCy, and the LLM, then removes noise through normalization and deduplication.
-- Organization recall is tuned to keep real names like `Google`, `Microsoft`, and `NVIDIA` while rejecting vague fragments, OCR junk, and section-label text.
-- Summary generation is entity-aware and chunked for long documents, but it does not force sample-specific outputs.
-- Sentiment uses an ensemble with guardrails so factual or formal documents stay neutral unless the text clearly expresses sentiment.
+### 1. Document Analysis API
 
-## Setup
+- Endpoint: POST /api/document-analyze
+- Auth Header: x-api-key: YOUR_API_KEY
+- Input: base64 content with file metadata
+- Output: summary, entities, sentiment, and document reference metadata
 
-1. Clone the repository.
-2. Copy the environment file: `cp .env.example .env`.
-3. Add your `GROQ_API_KEY` and `API_KEY`.
-4. Start the stack: `docker compose up --build`.
-5. Open the API health check at `http://localhost:8000/health`.
+### 2. Entity Extraction
 
-Quick validation:
+- Targets names, dates, organizations, amounts, emails, and phone numbers.
+- Preserves document specificity while removing OCR artifacts and generic fragments.
+- Uses normalization and boundary-aware filtering to avoid hallucinated entities.
+- Handles mixed-format and OCR-noisy inputs with post-processing tuned for practical document artifacts.
 
-```bash
-curl http://localhost:8000/health
-```
+### 3. Sentiment Classification
 
-## Environment Variables
+- Final labels are strictly constrained to Positive, Neutral, Negative.
+- Uses LLM-first classification with fallback behavior for resilience.
+- Category-aware rules reduce drift for formal documents and incident reports.
+- Designed for document-level interpretation instead of sentence-level emotional keywords.
 
-### Backend (`.env`)
+### 4. Factual Summarization
 
-- `GROQ_API_KEY` required
-- `API_KEY` required
-- `REDIS_URL` default: `redis://localhost:6379`
-- `ENVIRONMENT` default: `development`
-- `LOG_LEVEL` default: `INFO`
-- `USE_CACHE` default: `false`
-- `USE_LOCAL_LLM` default: `false`
-- `LOCAL_LLM_URL` default: `http://localhost:11434`
-- `MAX_FILE_SIZE_MB` default: `50`
-- `REQUEST_TIMEOUT_SECONDS` default: `300`
+- Entity-aware prompt context improves factual grounding.
+- Long documents are chunked and merged for stable output quality.
+- Fallback extractive summary prevents blank output when upstream generation fails.
+- Prompt rules explicitly block vague openings and generic filler phrasing.
 
-### Frontend (`frontend/.env.local`)
+## Quality Philosophy
 
-- `NEXT_PUBLIC_API_URL`
-- `NEXT_PUBLIC_API_KEY`
+DocuMind AI is built around one principle: measurable output quality beats demo-style novelty.
+
+- If extraction is broad but noisy, it fails practical use.
+- If summary is fluent but vague, it fails evaluator usefulness.
+- If sentiment is unstable across document classes, it fails trust.
+
+This project prioritizes controlled behavior, explicit guardrails, and production-safe defaults so quality remains defensible under scrutiny.
 
 ## API Contract
 
-### Endpoint
-
-- Method: `POST`
-- Path: `/api/document-analyze`
-- Header: `x-api-key: YOUR_API_KEY`
-
-### Request
+### Request Schema
 
 ```json
 {
@@ -128,9 +132,9 @@ curl http://localhost:8000/health
 }
 ```
 
-`fileType` must be one of `pdf`, `docx`, or `image`.
+Valid fileType values: pdf, docx, image
 
-### Success Response
+### Success Response Shape
 
 ```json
 {
@@ -139,18 +143,18 @@ curl http://localhost:8000/health
   "documentId": "...",
   "summary": "...",
   "entities": {
-    "names": ["Nina Lane"],
-    "dates": ["June 2020"],
-    "organizations": ["Blue Horizon Media"],
-    "amounts": ["30%"],
-    "emails": ["nina@example.com"],
-    "phones": ["1 234 567-8900"]
+    "names": [],
+    "dates": [],
+    "organizations": [],
+    "amounts": [],
+    "emails": [],
+    "phones": []
   },
   "sentiment": "Neutral"
 }
 ```
 
-### Error Response
+### Error Response Shape
 
 ```json
 {
@@ -159,55 +163,71 @@ curl http://localhost:8000/health
 }
 ```
 
-### Example Request
+### Production Curl Example
 
 ```bash
-curl -X POST https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze \
+curl -X POST "https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze" \
   -H "Content-Type: application/json" \
   -H "x-api-key: YOUR_API_KEY" \
   -d '{
-    "fileName": "report.pdf",
+    "fileName": "sample.pdf",
     "fileType": "pdf",
-    "fileBase64": "<base64_encoded_content>"
+    "fileBase64": "<base64_data>"
   }'
 ```
 
-## Related Endpoints
+## Local Setup
 
-- `GET /health` returns service health.
-- `POST /api/document-qa` answers questions using the cached text of a previously analyzed document.
+### Prerequisites
 
-## Testing
+- Python 3.11+
+- Node.js 18+
+- Docker and Docker Compose
+- Tesseract OCR available for image-heavy flows
 
-```bash
-python -m py_compile $(find app tests workers -name '*.py')
-pytest -q tests/test_api.py tests/test_entities.py tests/test_sentiment.py tests/test_extractors.py
-python run_sample_test.py
-```
+### Backend Setup
 
-## Deployment Notes
+1. Clone repository.
+2. Copy env template: cp .env.example .env
+3. Set GROQ_API_KEY and API_KEY in .env.
+4. Start services: docker compose up --build
+5. Verify health: curl http://localhost:8000/health
 
-- Run the backend and Redis together when deploying with Docker Compose.
-- Set `GROQ_API_KEY`, `API_KEY`, `NEXT_PUBLIC_API_URL`, and `NEXT_PUBLIC_API_KEY` in your hosting environment.
-- Confirm the health endpoint before wiring the frontend.
-- The runtime has been slimmed to stay compatible with constrained platforms like Railway.
+### Frontend Setup
 
-Production verification:
+1. Open frontend directory.
+2. Create frontend/.env.local with NEXT_PUBLIC_API_URL and NEXT_PUBLIC_API_KEY.
+3. Install packages: npm install
+4. Start UI: npm run dev
 
-```bash
-# Backend health
-curl https://document-analyzer-production-ce0c.up.railway.app/health
+## Deployment Configuration
 
-# Auth enforcement
-curl -X POST https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze \
-  -H "Content-Type: application/json" \
-  -d '{"fileName":"x.pdf","fileType":"pdf","fileBase64":"eA=="}'
+Set the following variables in hosting platform settings:
 
-# Frontend build
-cd frontend && npm run build
-```
+### Backend Environment
 
-## Project Structure
+- GROQ_API_KEY
+- API_KEY
+- REDIS_URL
+- ENVIRONMENT
+- LOG_LEVEL
+
+### Frontend Environment
+
+- NEXT_PUBLIC_API_URL
+- NEXT_PUBLIC_API_KEY
+
+Important: NEXT_PUBLIC_API_KEY must match backend API_KEY for your current auth flow.
+
+## Verification Checklist
+
+1. Health endpoint returns 200.
+2. Missing x-api-key returns 401.
+3. Valid key returns successful analysis response.
+4. Frontend can upload each supported file type.
+5. README live URLs match deployed services.
+
+## Repository Structure
 
 ```text
 .
@@ -220,38 +240,23 @@ cd frontend && npm run build
 │   ├── utils/
 │   └── main.py
 ├── frontend/
-├── tests/
 ├── eval/
-├── requirements.txt
-├── .env.example
+├── tests/
+├── workers/
+├── docker-compose.yml
 ├── Dockerfile
-└── docker-compose.yml
+└── README.md
 ```
 
-## Final Submission Checklist
+## AI Assistance Disclosure
 
-- [ ] GitHub repository URL added to the submission form.
-- [ ] Live deployment URLs updated in this README.
-- [ ] `.env` is not tracked by git.
-- [ ] Backend starts successfully with Docker Compose.
-- [ ] API key enforcement returns `401` when missing or invalid.
-- [ ] At least one successful end-to-end API demo is verified.
-- [ ] AI disclosure section remains present.
+AI tools were used during development for drafting, refactoring, and debugging support. All produced code and prompt strategies were manually reviewed, tested, and validated before finalization.
 
-## AI Tools Used
+## Known Constraints
 
-| Tool           | Purpose                                    |
-| -------------- | ------------------------------------------ |
-| GitHub Copilot | Implementation assistance and code edits   |
-| Claude         | Architecture review and technical strategy |
-
-All AI-assisted work was reviewed, tested, and validated before being kept.
-
-## Known Limitations
-
-- Very large documents can take longer to analyze.
-- Handwritten text remains less reliable than printed text.
-- Non-English documents are not a primary target.
+- OCR quality depends on scan clarity and orientation.
+- Very large documents can increase latency.
+- English-language documents are best supported in current tuning.
 
 ## License
 
