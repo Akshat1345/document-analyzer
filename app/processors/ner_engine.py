@@ -38,6 +38,10 @@ ORG_CONTEXT_PATTERNS = [
     re.compile(r"\b([A-Z][A-Za-z&.'-]+\s+School\s+of\s+[A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+)?)\b"),
     re.compile(r"\b([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,4}\s+(?:of\s+)?(?:Design|Technology|Arts|Science|Business|Engineering))\b"),
 ]
+ORG_LIST_PATTERNS = [
+    re.compile(r"(?:companies\s+such\s+as|such\s+as|including|like)\s+([A-Z0-9][A-Za-z0-9&.'-]*(?:\s*,\s*[A-Z0-9][A-Za-z0-9&.'-]*)*(?:\s*,?\s*(?:and|or)\s+[A-Z0-9][A-Za-z0-9&.'-]*)?)", re.IGNORECASE),
+    re.compile(r"([A-Z][A-Za-z0-9&.'-]+(?:\s*,\s*[A-Z][A-Za-z0-9&.'-]+)+(?:\s*,?\s*(?:and|or)\s+[A-Z][A-Za-z0-9&.'-]+)?)"),
+]
 
 
 class NEREngine:
@@ -164,15 +168,20 @@ class NEREngine:
                     value = match.group(1).strip()
                     if value:
                         out["organizations"].append(value)
-                lowered_line = line.lower()
-                if any(keyword in lowered_line for keyword in ["agency", "media", "university", "school", "institute", "company", "corp", "inc", "ltd", "llc", "group", "studio", "solutions", "systems", "labs", "consulting", "technology", "technologies", "services"]):
-                    candidate = re.sub(r"^[^A-Z]*", "", line).strip(" ,;:-")
-                    if 2 <= len(candidate.split()) <= 8:
-                        out["organizations"].append(candidate)
             for match in pattern.finditer(text):
                 value = match.group(1).strip()
                 if value:
                     out["organizations"].append(value)
+
+        for pattern in ORG_LIST_PATTERNS:
+            for line in normalized_lines:
+                for match in pattern.finditer(line):
+                    raw = match.group(1).strip()
+                    parts = re.split(r"\s*,\s*|\s+and\s+|\s+or\s+", raw, flags=re.IGNORECASE)
+                    for part in parts:
+                        candidate = part.strip().strip(" ,;:-")
+                        if candidate:
+                            out["organizations"].append(candidate)
         return out
 
     def extract_all(

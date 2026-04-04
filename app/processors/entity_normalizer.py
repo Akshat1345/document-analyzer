@@ -204,8 +204,22 @@ def normalize_organization(org: str) -> str:
     if len(normalized.split()) > 8:
         return ""
     words = [w for w in re.split(r"\s+", normalized) if w]
-    has_org_hint = any(hint in lowered for hint in ORG_HINTS)
+    lowered_words = set(re.findall(r"[a-z0-9]+", lowered))
+    has_org_hint = any(hint in lowered_words for hint in ORG_HINTS)
     title_words = sum(1 for w in words if re.fullmatch(r"[A-Z][A-Za-z&.'-]*", w) is not None)
+    if len(words) == 1:
+        single = words[0]
+        if (
+            single.lower() in COMMON_FALSE_NAME_WORDS
+            or single.lower() in COMMON_GENERIC_ORG_WORDS
+            or single.lower() in ORG_NOISE_TERMS
+            or single.lower() in NAME_NOISE_TERMS
+            or single.lower() in LOCATION_TERMS
+        ):
+            return ""
+        if not (single.isupper() and len(single) >= 4) and not (single[0].isupper() and len(single) >= 4):
+            return ""
+        return normalized
     if not has_org_hint:
         return ""
     if title_words < 1:
@@ -289,7 +303,11 @@ def filter_false_positives(entities: list[str], entity_type: str) -> list[str]:
                 continue
             if any(term in lowered for term in LOCATION_TERMS) and len(value.split()) > 3:
                 continue
-            if value.isupper() and len(value) <= 8:
+            if not value[0].isupper() and not value.isupper():
+                continue
+            if len(value.split()) > 4 and not any(hint in lowered for hint in ORG_HINTS):
+                continue
+            if value.isupper() and len(value) <= 3:
                 continue
         elif entity_type == "dates":
             if not any(ch.isdigit() for ch in value):
