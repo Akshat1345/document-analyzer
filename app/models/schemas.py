@@ -20,6 +20,8 @@ class EntitiesResponse(BaseModel):
     dates: List[str] = Field(default_factory=list)
     organizations: List[str] = Field(default_factory=list)
     amounts: List[str] = Field(default_factory=list)
+    emails: List[str] = Field(default_factory=list)
+    phones: List[str] = Field(default_factory=list)
 
 
 class AnalysisResponse(BaseModel):

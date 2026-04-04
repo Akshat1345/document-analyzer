@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
-    USE_CACHE: bool = True
+    USE_CACHE: bool = False
     USE_LOCAL_LLM: bool = False
     LOCAL_LLM_URL: str = "http://localhost:11434"
     MAX_FILE_SIZE_MB: int = 50

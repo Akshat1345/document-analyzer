@@ -42,6 +42,42 @@ COMMON_FALSE_NAME_WORDS = {
     "interal",
 }
 COMMON_GENERIC_ORG_WORDS = {"company", "organization", "agency", "institution", "limited", "inc", "ltd"}
+ORG_SINGLE_WORD_STOPWORDS = {
+    "company",
+    "organization",
+    "agency",
+    "institution",
+    "department",
+    "office",
+    "division",
+    "team",
+    "group",
+    "limited",
+    "inc",
+    "ltd",
+    "llc",
+    "corp",
+    "co",
+    "ceo",
+    "cto",
+    "cfo",
+    "cio",
+    "hr",
+    "it",
+    "qa",
+    "ui",
+    "ux",
+    "usa",
+    "us",
+    "uk",
+    "eu",
+    "un",
+    "ai",
+    "ml",
+    "dl",
+    "ny",
+    "nyc",
+}
 NAME_NOISE_TERMS = {
     "software",
     "excel",
@@ -71,10 +107,17 @@ ORG_NOISE_TERMS = {
     "social media campaign",
     "company corporate",
     "corporate",
+    "graphic",
+    "design",
+    "photoshop",
+    "brand",
+    "social",
+    "suite",
+    "interests social media",
+    "adobe creative suite",
 }
 ORG_HINTS = {
     "agency",
-    "media",
     "school",
     "university",
     "college",
@@ -88,6 +131,20 @@ ORG_HINTS = {
     "group",
     "bank",
     "co",
+    "foundation",
+    "association",
+    "society",
+    "hospital",
+    "clinic",
+    "council",
+    "committee",
+    "board",
+    "department",
+    "office",
+    "center",
+    "centre",
+    "labs",
+    "lab",
 }
 ORG_ACTION_WORDS = {
     "led",
@@ -97,6 +154,22 @@ ORG_ACTION_WORDS = {
     "boosted",
     "created",
     "developed",
+    "building",
+    "built",
+    "combining",
+    "combined",
+    "driving",
+    "driven",
+    "delivering",
+    "delivered",
+    "supporting",
+    "supported",
+    "enabling",
+    "enabled",
+    "leveraging",
+    "leveraged",
+    "using",
+    "used",
 }
 ORG_ROLE_WORDS = {
     "management",
@@ -110,8 +183,80 @@ ORG_ROLE_WORDS = {
     "co-founder",
     "founder",
 }
+ORG_GENERIC_MULTIWORD_WORDS = {
+    "global",
+    "advanced",
+    "technology",
+    "technologies",
+    "innovation",
+    "industry",
+    "industrial",
+    "data",
+    "science",
+    "research",
+    "engineering",
+    "software",
+    "hardware",
+    "digital",
+    "business",
+    "enterprise",
+    "solutions",
+    "services",
+    "system",
+    "systems",
+    "platform",
+    "platforms",
+    "security",
+    "cybersecurity",
+    "development",
+    "analytics",
+    "computing",
+    "intelligence",
+}
 LOCATION_TERMS = {"new york", "york", "city", "cty", "manhattan", "la"}
+LOCATION_TERMS = LOCATION_TERMS | {"brooklyn", "ny", "nyc"}
 MONTH_PATTERN = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+
+
+def _word_tokens(value: str) -> list[str]:
+    return [token for token in re.split(r"\s+", value) if token]
+
+
+def _normalized_word_set(value: str) -> set[str]:
+    return {token for token in re.findall(r"[a-z0-9&]+", value.lower()) if token}
+
+
+def _has_org_hint(value: str) -> bool:
+    word_set = _normalized_word_set(value)
+    return any(hint in word_set for hint in ORG_HINTS)
+
+
+def _looks_like_brand_token(token: str) -> bool:
+    if not token:
+        return False
+    return bool(
+        re.fullmatch(r"[A-Z0-9&.-]{2,10}", token)
+        or re.fullmatch(r"[A-Z][A-Za-z0-9&.'-]*[A-Z][A-Za-z0-9&.'-]*", token)
+        or re.fullmatch(r"[A-Za-z]+\d+[A-Za-z0-9&.'-]*", token)
+        or re.fullmatch(r"\d+[A-Za-z][A-Za-z0-9&.'-]*", token)
+    )
+
+
+def _looks_like_title_case_org(tokens: list[str]) -> bool:
+    filtered = [token for token in tokens if token.lower() not in {"of", "and", "the", "for", "&"}]
+    if not filtered:
+        return False
+    return all(
+        re.fullmatch(r"[A-Z][A-Za-z0-9&.'-]*", token) is not None
+        or re.fullmatch(r"[A-Z0-9&.-]{2,10}", token) is not None
+        or _looks_like_brand_token(token)
+        for token in filtered
+    )
+
+
+def _is_generic_org_phrase(tokens: list[str]) -> bool:
+    normalized = {token.lower().strip(string.punctuation) for token in tokens if token.strip(string.punctuation)}
+    return normalized and normalized.issubset(ORG_GENERIC_MULTIWORD_WORDS)
 
 
 def normalize_name(name: str) -> str:
@@ -178,16 +323,20 @@ def normalize_organization(org: str) -> str:
     """Normalize organization and reject common non-organization phrases."""
 
     normalized = re.sub(r"\s+", " ", org.strip().strip(string.punctuation))
+    normalized = re.sub(r"^(?:and|or|the|a|an|for|from|in|at|with)\s+", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s+(?:and|or|the|a|an)$", "", normalized, flags=re.IGNORECASE)
     lowered = normalized.lower()
     if len(normalized) < 2:
         return ""
-    if lowered in COMMON_GENERIC_ORG_WORDS or lowered in ORG_NOISE_TERMS:
+    if lowered in COMMON_GENERIC_ORG_WORDS:
         return ""
     if lowered.startswith("company ") and any(term in lowered for term in {"corporate", "profile", "project"}):
         return ""
     if len(normalized.split()) == 1 and lowered in {"co", "corp", "inc", "ltd", "llc"}:
         return ""
     if re.search(r"\d{3,}", normalized):
+        return ""
+    if re.search(r"[\d][^\s]*[\d]", normalized):
         return ""
     # Reject lines likely coming from OCR-garbled section headers.
     if re.search(r"[{}<>|\\/]{2,}", normalized):
@@ -200,31 +349,43 @@ def normalize_organization(org: str) -> str:
         return ""
     if any(term in lowered for term in LOCATION_TERMS) and len(normalized.split()) > 3:
         return ""
+    if any(term in lowered for term in ORG_NOISE_TERMS) and not _has_org_hint(normalized):
+        return ""
     # Keep compact title-cased names and common suffixes.
     if len(normalized.split()) > 8:
         return ""
-    words = [w for w in re.split(r"\s+", normalized) if w]
-    lowered_words = set(re.findall(r"[a-z0-9]+", lowered))
-    has_org_hint = any(hint in lowered_words for hint in ORG_HINTS)
+    words = _word_tokens(normalized)
     title_words = sum(1 for w in words if re.fullmatch(r"[A-Z][A-Za-z&.'-]*", w) is not None)
     if len(words) == 1:
         single = words[0]
+        single_lower = single.lower()
         if (
-            single.lower() in COMMON_FALSE_NAME_WORDS
-            or single.lower() in COMMON_GENERIC_ORG_WORDS
-            or single.lower() in ORG_NOISE_TERMS
-            or single.lower() in NAME_NOISE_TERMS
-            or single.lower() in LOCATION_TERMS
+            single_lower in COMMON_FALSE_NAME_WORDS
+            or single_lower in COMMON_GENERIC_ORG_WORDS
+            or single_lower in ORG_NOISE_TERMS
+            or single_lower in NAME_NOISE_TERMS
+            or single_lower in LOCATION_TERMS
+            or single_lower in ORG_SINGLE_WORD_STOPWORDS
         ):
             return ""
-        if not (single.isupper() and len(single) >= 4) and not (single[0].isupper() and len(single) >= 4):
+        if _looks_like_brand_token(single) or (single[0].isupper() and len(single) >= 3):
+            return normalized
+        return ""
+    if any(token.lower() in ORG_SINGLE_WORD_STOPWORDS for token in words):
+        return ""
+    if _is_generic_org_phrase(words):
+        return ""
+    if _has_org_hint(normalized):
+        if title_words < 1:
             return ""
         return normalized
-    if not has_org_hint:
-        return ""
-    if title_words < 1:
-        return ""
-    return normalized
+    if 2 <= len(words) <= 4 and _looks_like_title_case_org(words):
+        return normalized
+    if any(_looks_like_brand_token(token) for token in words):
+        return normalized
+    if title_words >= 2 and len(words) <= 5:
+        return normalized
+    return ""
 
 
 def deduplicate_fuzzy(items: list[str]) -> list[str]:
@@ -283,31 +444,7 @@ def filter_false_positives(entities: list[str], entity_type: str) -> list[str]:
             if any(t.lower() in NAME_NOISE_TERMS for t in tokens):
                 continue
         elif entity_type == "organizations":
-            if lowered in COMMON_GENERIC_ORG_WORDS:
-                continue
-            if lowered in ORG_NOISE_TERMS:
-                continue
-            if lowered.startswith("company ") and any(term in lowered for term in {"corporate", "profile", "project"}):
-                continue
-            if len(value.split()) == 1 and lowered in {"co", "corp", "inc", "ltd", "llc"}:
-                continue
-            if re.search(r"\d{3,}", value):
-                continue
-            if len(value.split()) > 8:
-                continue
-            if any(word in lowered for word in ORG_ACTION_WORDS):
-                continue
-            if any(word in lowered for word in ORG_ROLE_WORDS):
-                continue
-            if any(term in lowered for term in NAME_NOISE_TERMS):
-                continue
-            if any(term in lowered for term in LOCATION_TERMS) and len(value.split()) > 3:
-                continue
-            if not value[0].isupper() and not value.isupper():
-                continue
-            if len(value.split()) > 4 and not any(hint in lowered for hint in ORG_HINTS):
-                continue
-            if value.isupper() and len(value) <= 3:
+            if not normalize_organization(value):
                 continue
         elif entity_type == "dates":
             if not any(ch.isdigit() for ch in value):

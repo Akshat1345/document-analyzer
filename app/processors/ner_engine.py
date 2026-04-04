@@ -1,7 +1,7 @@
 """
 Two-layer NER fusion engine.
 Layer 1: spaCy en_core_web_sm - fast, deterministic baseline.
-Layer 2: Llama 3.3 70B via Groq - context-aware, catches edge cases.
+Layer 2: Llama 3.3 70B via Groq - context-aware fallback.
 Results are merged with fuzzy deduplication.
 """
 
@@ -32,16 +32,24 @@ AMOUNT_PATTERNS = [
     re.compile(r"\b\d+(?:\.\d+)?%\b"),
     re.compile(r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b"),
 ]
+EMAIL_PATTERNS = [
+    re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+]
+PHONE_PATTERNS = [
+    re.compile(r"\b(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b"),
+]
 ORG_CONTEXT_PATTERNS = [
-    re.compile(r"\b(?:at|with|from|in|for|worked\s+at|worked\s+with|joined)\s+([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,5})", re.IGNORECASE),
-    re.compile(r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}(?:Agency|Media|University|School|Institute|Company|Corp|Inc|Ltd|LLC|Group|Studio|Solutions|Systems|Labs|Consulting|Technology|Technologies|Services|Design|Designs|College|Center|Co))\b"),
+    re.compile(r"(?i:\b(?:at|with|from|in|for|worked\s+at|worked\s+with|joined))\s+([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,5})"),
+    re.compile(r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}(?:Agency|Media|University|Institute|Company|Corp|Inc|Ltd|LLC|Group|Studio|Consulting|College|Center|Labs|Solutions|Systems|Services))\b"),
     re.compile(r"\b([A-Z][A-Za-z&.'-]+\s+School\s+of\s+[A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+)?)\b"),
     re.compile(r"\b([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,4}\s+(?:of\s+)?(?:Design|Technology|Arts|Science|Business|Engineering))\b"),
 ]
 ORG_LIST_PATTERNS = [
-    re.compile(r"(?:companies\s+such\s+as|such\s+as|including|like)\s+([A-Z0-9][A-Za-z0-9&.'-]*(?:\s*,\s*[A-Z0-9][A-Za-z0-9&.'-]*)*(?:\s*,?\s*(?:and|or)\s+[A-Z0-9][A-Za-z0-9&.'-]*)?)", re.IGNORECASE),
+    re.compile(r"(?i:(?:companies\s+such\s+as|such\s+as|including|like))\s+([A-Z0-9][A-Za-z0-9&.'-]*(?:\s*,\s*[A-Z0-9][A-Za-z0-9&.'-]*)*(?:\s*,?\s*(?:and|or)\s+[A-Z0-9][A-Za-z0-9&.'-]*)?)"),
     re.compile(r"([A-Z][A-Za-z0-9&.'-]+(?:\s*,\s*[A-Z][A-Za-z0-9&.'-]+)+(?:\s*,?\s*(?:and|or)\s+[A-Z][A-Za-z0-9&.'-]+)?)"),
 ]
+WINDOW_MAX_CHARS = 3500
+WINDOW_OVERLAP = 1
 
 
 class NEREngine:
@@ -68,6 +76,49 @@ class NEREngine:
             )
             cls._spacy_model = None
 
+    def _iter_text_windows(self, text: str, max_chars: int = WINDOW_MAX_CHARS) -> list[str]:
+        """Split long text into paragraph windows so extraction covers the full document."""
+
+        paragraphs = [paragraph.strip() for paragraph in re.split(r"\n{2,}", text) if paragraph.strip()]
+        if not paragraphs:
+            return [text]
+
+        windows: list[str] = []
+        current: list[str] = []
+        current_chars = 0
+        for paragraph in paragraphs:
+            paragraph_chars = len(paragraph)
+            if current and current_chars + paragraph_chars > max_chars:
+                windows.append("\n\n".join(current))
+                current = current[-WINDOW_OVERLAP:] if WINDOW_OVERLAP else []
+                current_chars = sum(len(part) for part in current)
+            current.append(paragraph)
+            current_chars += paragraph_chars
+
+        if current:
+            windows.append("\n\n".join(current))
+        return windows if windows else [text]
+
+    def _build_llm_excerpt(self, text: str, max_chars: int = 6000) -> str:
+        """Select representative text slices so the fallback LLM sees the whole document shape."""
+
+        stripped = text.strip()
+        if len(stripped) <= max_chars:
+            return stripped
+
+        slice_size = max(1200, max_chars // 3)
+        middle_start = max(0, len(stripped) // 2 - slice_size // 2)
+        segments = [
+            stripped[:slice_size].strip(),
+            stripped[middle_start:middle_start + slice_size].strip(),
+            stripped[-slice_size:].strip(),
+        ]
+        unique_segments = []
+        for segment in segments:
+            if segment and segment not in unique_segments:
+                unique_segments.append(segment)
+        return "\n\n".join(unique_segments)
+
     def _extract_spacy(self, text: str) -> dict:
         """
         Extract named entities using spaCy.
@@ -77,24 +128,27 @@ class NEREngine:
             "names": [],
             "dates": [],
             "organizations": [],
-            "amounts": []
+            "amounts": [],
+            "emails": [],
+            "phones": [],
         }
         if not self._spacy_model:
             return result
         try:
-            doc = self._spacy_model(text[:5000])
-            for ent in doc.ents:
-                val = ent.text.strip()
-                if not val:
-                    continue
-                if ent.label_ == "PERSON":
-                    result["names"].append(val)
-                elif ent.label_ == "ORG":
-                    result["organizations"].append(val)
-                elif ent.label_ == "DATE":
-                    result["dates"].append(val)
-                elif ent.label_ == "MONEY":
-                    result["amounts"].append(val)
+            for window in self._iter_text_windows(text):
+                doc = self._spacy_model(window)
+                for ent in doc.ents:
+                    val = ent.text.strip()
+                    if not val:
+                        continue
+                    if ent.label_ == "PERSON":
+                        result["names"].append(val)
+                    elif ent.label_ == "ORG":
+                        result["organizations"].append(val)
+                    elif ent.label_ == "DATE":
+                        result["dates"].append(val)
+                    elif ent.label_ == "MONEY":
+                        result["amounts"].append(val)
         except Exception as e:
             logger.warning("spaCy NER error: %s", e)
         return result
@@ -106,12 +160,14 @@ class NEREngine:
         that rule-based spaCy misses.
         """
         try:
-            result = get_entities_from_claude(text)
+            result = get_entities_from_claude(self._build_llm_excerpt(text))
             return {
                 "names": result.names or [],
                 "dates": result.dates or [],
                 "organizations": result.organizations or [],
-                "amounts": result.amounts or []
+                "amounts": result.amounts or [],
+                "emails": result.emails or [],
+                "phones": result.phones or [],
             }
         except Exception as e:
             logger.warning(
@@ -121,7 +177,9 @@ class NEREngine:
                 "names": [],
                 "dates": [],
                 "organizations": [],
-                "amounts": []
+                "amounts": [],
+                "emails": [],
+                "phones": [],
             }
 
     def _merge(self, spacy_r: dict, llm_r: dict) -> dict:
@@ -131,7 +189,7 @@ class NEREngine:
         (e.g. 'Apple Inc' vs 'Apple Inc.').
         """
         merged = {}
-        for field in ["names", "dates", "organizations", "amounts"]:
+        for field in ["names", "dates", "organizations", "amounts", "emails", "phones"]:
             combined = (
                 spacy_r.get(field, []) +
                 llm_r.get(field, [])
@@ -144,6 +202,8 @@ class NEREngine:
                 combined = [normalize_organization(v) for v in combined]
             elif field == "amounts":
                 combined = [normalize_amount(v) for v in combined]
+            elif field in {"emails", "phones"}:
+                combined = [v.strip() for v in combined]
 
             combined = [v for v in combined if v]
             combined = filter_false_positives(combined, field)
@@ -154,7 +214,7 @@ class NEREngine:
     def _extract_regex(self, text: str) -> dict:
         """Extract high-confidence dates and amounts via regex fallback."""
 
-        out = {"names": [], "dates": [], "organizations": [], "amounts": []}
+        out = {"names": [], "dates": [], "organizations": [], "amounts": [], "emails": [], "phones": []}
         normalized_lines = [re.sub(r"\s+", " ", line.strip()) for line in text.splitlines() if line.strip()]
         for pattern in DATE_PATTERNS:
             for match in pattern.finditer(text):
@@ -162,6 +222,12 @@ class NEREngine:
         for pattern in AMOUNT_PATTERNS:
             for match in pattern.finditer(text):
                 out["amounts"].append(match.group(0).strip())
+        for pattern in EMAIL_PATTERNS:
+            for match in pattern.finditer(text):
+                out["emails"].append(match.group(0).strip())
+        for pattern in PHONE_PATTERNS:
+            for match in pattern.finditer(text):
+                out["phones"].append(match.group(0).strip())
         for pattern in ORG_CONTEXT_PATTERNS:
             for line in normalized_lines:
                 for match in pattern.finditer(line):
@@ -202,12 +268,16 @@ class NEREngine:
                 "dates": spacy_result.get("dates", []) + regex_result.get("dates", []),
                 "organizations": spacy_result.get("organizations", []) + regex_result.get("organizations", []),
                 "amounts": spacy_result.get("amounts", []) + regex_result.get("amounts", []),
+                "emails": spacy_result.get("emails", []) + regex_result.get("emails", []),
+                "phones": spacy_result.get("phones", []) + regex_result.get("phones", []),
             },
             {
                 "names": llm_result.get("names", []),
                 "dates": llm_result.get("dates", []),
                 "organizations": llm_result.get("organizations", []),
                 "amounts": llm_result.get("amounts", []),
+                "emails": llm_result.get("emails", []),
+                "phones": llm_result.get("phones", []),
             },
         )
         return EntitiesResponse(**merged)

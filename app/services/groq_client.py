@@ -15,6 +15,27 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 OLLAMA_MODEL = "llama3.2:3b"
 
 
+def _build_document_excerpt(text: str, max_chars: int = 6000) -> str:
+    """Build a representative excerpt from a long document without biasing toward the opening section."""
+
+    stripped = text.strip()
+    if len(stripped) <= max_chars:
+        return stripped
+
+    slice_size = max(1200, max_chars // 3)
+    middle_start = max(0, len(stripped) // 2 - slice_size // 2)
+    segments = [
+        stripped[:slice_size].strip(),
+        stripped[middle_start:middle_start + slice_size].strip(),
+        stripped[-slice_size:].strip(),
+    ]
+    unique_segments = []
+    for segment in segments:
+        if segment and segment not in unique_segments:
+            unique_segments.append(segment)
+    return "\n\n".join(unique_segments)
+
+
 def _build_client():
     """Build and return a chat client plus selected model name."""
 
@@ -38,12 +59,15 @@ class ClaudeEntities(BaseModel):
     dates: List[str] = Field(default_factory=list, description="Dates exactly as they appear in text. Empty list if none.")
     organizations: List[str] = Field(default_factory=list, description="Company, institution, agency names. Empty list if none.")
     amounts: List[str] = Field(default_factory=list, description="Monetary values with currency symbols. Empty list if none.")
+    emails: List[str] = Field(default_factory=list, description="Email addresses exactly as they appear in text. Empty list if none.")
+    phones: List[str] = Field(default_factory=list, description="Phone numbers exactly as they appear in text. Empty list if none.")
 
 
 def get_entities_from_claude(text: str) -> ClaudeEntities:
     """Extract entities from text with schema-constrained LLM output."""
 
     try:
+        excerpt = _build_document_excerpt(text)
         response = _client.chat.completions.create(
             model=_model,
             response_format={"type": "json_object"},
@@ -52,19 +76,19 @@ def get_entities_from_claude(text: str) -> ClaudeEntities:
                 {
                     "role": "system",
                     "content": (
-                        "You are a precise NER system. Extract ONLY entities "
-                        "explicitly present in the text. Never infer or hallucinate. "
-                        "Ignore OCR-garbled tokens and partial words. "
-                        "For organizations: include only real company/institution names, "
-                        "never job titles, skills, tools, section headers, generic words "
-                        "like 'Company', or vague phrases. "
+                        "You are a precise document entity extractor. Extract ONLY entities "
+                        "explicitly present in the text. Never infer, guess, or use the document type. "
+                        "Ignore OCR-garbled tokens, partial words, section headers, and sentence fragments. "
+                        "For organizations: include only real organization names explicitly visible in the document, "
+                        "including companies, brands, institutions, universities, nonprofits, government bodies, "
+                        "hospitals, labs, and associations. Do not include vague descriptions or role titles. "
                         "For dates: include only valid date-like expressions or years. "
                         "For amounts: include only currency values or percentages. "
                         "Return ONLY valid JSON with keys: names, dates, organizations, amounts. "
                         "Use [] when a key has no values."
                     ),
                 },
-                {"role": "user", "content": f"Extract named entities:\n\n{text[:3000]}"},
+                {"role": "user", "content": f"Extract named entities from this document:\n\n{excerpt}"},
             ],
         )
         content = (response.choices[0].message.content or "").strip()

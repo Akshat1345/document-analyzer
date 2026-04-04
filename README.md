@@ -1,182 +1,151 @@
-# Data Extraction API
+# DocuMind AI
 
-DocuMind AI is a production-ready document intelligence platform for extracting structured insights from PDF, DOCX, and image files.
+DocuMind AI is a document intelligence API for PDFs, DOCX files, and images. It extracts structured entities, summarizes the document, and returns a sentiment label while keeping the pipeline generic across document types.
 
-## Description
+## What It Does
 
-Intelligent document processing API that accepts PDF, DOCX, and image files, extracts text, identifies named entities, classifies sentiment, and generates AI-powered summaries using a multi-model pipeline.
+The system accepts a base64-encoded document, extracts text with format-specific parsers, runs entity extraction across the full document, and returns a strict JSON response. The entity pipeline is not tied to sample documents or hardcoded mappings; it uses candidate generation, normalization, deduplication, and validation to maximize recall without allowing vague fragments through.
 
-## Hackathon Compliance Matrix
+## Highlights
 
-| Requirement                                                                | Status      | Evidence                                  |
-| -------------------------------------------------------------------------- | ----------- | ----------------------------------------- |
-| Endpoint `POST /api/document-analyze`                                      | Implemented | API Contracts section                     |
-| Auth header `x-api-key` with 401 on invalid/missing                        | Implemented | API Contracts + runtime behavior          |
-| Request `fileName`, `fileType`, `fileBase64`                               | Implemented | API Contracts section                     |
-| Response includes `status`, `fileName`, `summary`, `entities`, `sentiment` | Implemented | Success response (official spec shape)    |
-| Sentiment limited to Positive/Neutral/Negative                             | Implemented | Core Capabilities + API contract          |
-| README includes Description, Tech Stack, Setup Instructions, Approach      | Implemented | Required sections present                 |
-| AI tools disclosure present                                                | Implemented | AI Tools Used section                     |
-| No hardcoded response mapping                                              | Implemented | Dynamic extraction/summarization pipeline |
+- `POST /api/document-analyze` for full-document analysis.
+- `x-api-key` authentication with `401` on missing or invalid keys.
+- OCR support for scanned images and image-heavy PDFs.
+- Entity extraction for names, dates, organizations, amounts, emails, and phone numbers.
+- Sentiment output constrained to `Positive`, `Neutral`, or `Negative`.
+- Document-scoped Q&A endpoint backed by cached text rather than heavy vector infrastructure.
+- Docker-based deployment with Redis and background workers.
+
+## Hackathon Compliance
+
+| Requirement                                         | Status      | Notes                                                    |
+| --------------------------------------------------- | ----------- | -------------------------------------------------------- |
+| `POST /api/document-analyze`                        | Implemented | Primary analysis endpoint                                |
+| `x-api-key` auth with 401 handling                  | Implemented | Enforced before processing                               |
+| Request fields `fileName`, `fileType`, `fileBase64` | Implemented | Matches API contract                                     |
+| Response includes required analysis payload         | Implemented | `status`, `fileName`, `summary`, `entities`, `sentiment` |
+| Sentiment only in allowed labels                    | Implemented | `Positive`, `Neutral`, `Negative`                        |
+| README contains description, stack, setup, approach | Implemented | This document                                            |
+| AI disclosure included                              | Implemented | See AI Tools Used                                        |
+| No hardcoded sample mapping                         | Implemented | Extraction is content-driven                             |
 
 ## Live Demo
 
 - API URL: https://your-deployment.railway.app
-- Frontend: https://your-frontend.railway.app
-(Update these URLs after deployment)
+- Frontend URL: https://your-frontend.railway.app
+
+Update these after deployment.
 
 ## Tech Stack
 
-- Framework: FastAPI (Python 3.11)
-- NER Layer 1: spaCy en_core_web_sm
-- NER Layer 2: Llama 3.3 70B via Groq API
-- Summarization: Llama 3.3 70B via Groq API (Chain-of-Density)
-- Sentiment: Llama 3.3 70B via Groq API + VADER ensemble
-- OCR: Tesseract (pytesseract) with multi-PSM fallback strategy
-- PDF: PyMuPDF + pdfplumber
-- DOCX: python-docx
-- Cache: Redis
-- Queue: Celery
-- Deploy: Docker -> Railway / Render
+- Backend: FastAPI, Python 3.11
+- Extraction: PyMuPDF, pdfplumber, python-docx, Tesseract OCR
+- NLP: spaCy, Groq-hosted Llama 3.3 70B, VADER
+- Storage and workers: Redis, Celery
+- Frontend: Next.js 14, React, TypeScript
+- Deployment: Docker, Docker Compose, Railway-compatible runtime
 
-## Setup Instructions
+## Architecture
 
-1. Clone the repository
-2. `cp .env.example .env` and fill in `GROQ_API_KEY` and `API_KEY`
-3. Get free Groq API key at https://console.groq.com
-4. `docker compose up --build`
-5. API ready at http://localhost:8000/api/document-analyze
+```mermaid
+flowchart TD
+  A[Client Upload] --> B[POST /api/document-analyze]
+  B --> C[API Key Validation]
+  C --> D[Decode Base64]
+  D --> E{File type}
+  E -->|PDF| F[PDF extractor]
+  E -->|DOCX| G[DOCX extractor]
+  E -->|Image| H[Image extractor + OCR]
+  F --> I[Plain text]
+  G --> I
+  H --> I
+  I --> J[Document classification]
+  J --> K[Entity extraction]
+  J --> L[Sentiment analysis]
+  K --> M[Normalization + filtering]
+  M --> N[Summary generator]
+  L --> O[Sentiment label]
+  N --> P[Final JSON response]
+  O --> P
+```
 
-Quick health check:
+## Extraction Approach
+
+- Text extraction is file-format aware, so PDFs, DOCX documents, and images each use the most reliable parser first.
+- Entity extraction is generic. The code collects candidates from regex, spaCy, and the LLM, then removes noise through normalization and deduplication.
+- Organization recall is tuned to keep real names like `Google`, `Microsoft`, and `NVIDIA` while rejecting vague fragments, OCR junk, and section-label text.
+- Summary generation is entity-aware and chunked for long documents, but it does not force sample-specific outputs.
+- Sentiment uses an ensemble with guardrails so factual or formal documents stay neutral unless the text clearly expresses sentiment.
+
+## Setup
+
+1. Clone the repository.
+2. Copy the environment file: `cp .env.example .env`.
+3. Add your `GROQ_API_KEY` and `API_KEY`.
+4. Start the stack: `docker compose up --build`.
+5. Open the API health check at `http://localhost:8000/health`.
+
+Quick validation:
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-## Approach
+## Environment Variables
 
-- Text extraction strategy by file format:
-  - PDF: PyMuPDF page-by-page with pdfplumber fallback, scanned pages auto-detected and sent to Tesseract OCR
-  - DOCX: paragraph, heading, and table-aware extraction
-  - Image: Tesseract with contrast/sharpness preprocessing, tries PSM 6 -> PSM 3 -> PSM 11 for maximum coverage
-- NER strategy:
-  - Two-layer fusion (spaCy sm baseline + Llama 3.3 70B), merged with fuzzy deduplication
-- Sentiment strategy:
-  - Llama 3.3 70B primary with document-type context prompt + VADER fallback
-  - Neutral-bias calibration for formal documents
-- Summary strategy:
-  - Chain-of-Density prompting anchored to extracted entities for factual accuracy
+### Backend (`.env`)
 
-## System Diagram
+- `GROQ_API_KEY` required
+- `API_KEY` required
+- `REDIS_URL` default: `redis://localhost:6379`
+- `ENVIRONMENT` default: `development`
+- `LOG_LEVEL` default: `INFO`
+- `USE_CACHE` default: `false`
+- `USE_LOCAL_LLM` default: `false`
+- `LOCAL_LLM_URL` default: `http://localhost:11434`
+- `MAX_FILE_SIZE_MB` default: `50`
+- `REQUEST_TIMEOUT_SECONDS` default: `300`
 
-```mermaid
-flowchart TD
-  A[Client Upload] --> B[POST /api/document-analyze]
-  B --> C[Auth Validation<br/>x-api-key]
-  C --> D[Base64 Decode]
+### Frontend (`frontend/.env.local`)
 
-  subgraph X[Extraction Layer]
-    E{File Type}
-    F[PDF Extractor<br/>PyMuPDF + pdfplumber]
-    G[DOCX Extractor<br/>python-docx]
-    H[Image Extractor<br/>Tesseract]
-    E -->|pdf| F
-    E -->|docx| G
-    E -->|image| H
-  end
+- `NEXT_PUBLIC_API_URL`
+- `NEXT_PUBLIC_API_KEY`
 
-  D --> E
-  F --> I[Cleaned Text]
-  G --> I
-  H --> I
-
-  I --> J[Document Classifier]
-
-  subgraph Y[Analysis Layer]
-    K[NER Pipeline<br/>spaCy + Llama]
-    L[Sentiment Ensemble<br/>Llama + VADER]
-    M[Entity Fusion + Filters]
-    N[Summary Generator<br/>Chain-of-Density]
-  end
-
-  J --> K
-  J --> L
-  K --> M
-  M --> N
-  L --> O[Sentiment Label]
-
-  N --> P[Response Builder]
-  O --> P
-  P --> Q[JSON Response]
-```
-
-## End-to-End Flowchart
-
-```mermaid
-flowchart TD
-  S[Start] --> U[Receive request]
-  U --> V{API key valid?}
-  V -->|No| W[Return 401]
-  V -->|Yes| X{Base64 valid?}
-  X -->|No| Y[Return error JSON]
-  X -->|Yes| Z[Extract text by file type]
-  Z --> AA{Text sufficient?}
-  AA -->|No| AB[Return extraction error]
-  AA -->|Yes| AC[Run NER and sentiment in parallel]
-  AC --> AD[Generate summary]
-  AD --> AE[Build success JSON]
-  AE --> AG[Return response]
-```
-
-## Core Capabilities
-
-- Multi-format ingestion: PDF, DOCX, JPG, JPEG, PNG
-- Entity extraction: names, dates, organizations, amounts
-- Sentiment output strictly from: Positive, Neutral, Negative
-- Adaptive factual summarization
-- Redis-backed caching and async worker support
-
-## What Judges Should Evaluate First
-
-1. API authenticity: send different files and observe non-hardcoded, content-dependent outputs
-2. OCR resilience: test scanned/visual documents and compare extracted entities
-3. Error handling: test invalid API keys, invalid base64, and low-text files
-4. Operational readiness: verify Docker startup, health endpoint, and frontend integration
-
-## API Contracts
+## API Contract
 
 ### Endpoint
 
-- Method: POST
+- Method: `POST`
 - Path: `/api/document-analyze`
-- Header: `x-api-key: YOUR_SECRET_API_KEY`
+- Header: `x-api-key: YOUR_API_KEY`
 
-Missing or invalid API key returns 401.
-
-### Request Body
+### Request
 
 ```json
 {
-  "fileName": "sample1.pdf",
+  "fileName": "report.pdf",
   "fileType": "pdf",
-  "fileBase64": "<base64>"
+  "fileBase64": "<base64_encoded_content>"
 }
 ```
 
-`fileType` values: `pdf | docx | image`
+`fileType` must be one of `pdf`, `docx`, or `image`.
 
-### Success Response (Official Spec Shape)
+### Success Response
 
 ```json
 {
   "status": "success",
-  "fileName": "sample1.pdf",
+  "fileName": "report.pdf",
+  "documentId": "...",
   "summary": "...",
   "entities": {
-    "names": ["Ravi Kumar"],
-    "dates": ["10 March 2026"],
-    "organizations": ["ABC Pvt Ltd"],
-    "amounts": ["₹10,000"]
+    "names": ["Nina Lane"],
+    "dates": ["June 2020"],
+    "organizations": ["Blue Horizon Media"],
+    "amounts": ["30%"],
+    "emails": ["nina@example.com"],
+    "phones": ["1 234 567-8900"]
   },
   "sentiment": "Neutral"
 }
@@ -204,27 +173,40 @@ curl -X POST https://your-deployment.railway.app/api/document-analyze \
   }'
 ```
 
-### Example Response
+## Related Endpoints
 
-```json
-{
-  "status": "success",
-  "fileName": "report.pdf",
-  "summary": "...",
-  "entities": {
-    "names": [],
-    "dates": [],
-    "organizations": ["Google", "Microsoft"],
-    "amounts": []
-  },
-  "sentiment": "Positive"
-}
+- `GET /health` returns service health.
+- `POST /api/document-qa` answers questions using the cached text of a previously analyzed document.
+
+## Testing
+
+```bash
+python -m py_compile $(find app tests workers -name '*.py')
+pytest -q tests/test_api.py tests/test_entities.py tests/test_sentiment.py tests/test_extractors.py
+python run_sample_test.py
 ```
 
-## Project Structure Note
+## Deployment Notes
 
-This project uses `app/` instead of the spec's suggested `src/`, following FastAPI best practices with proper package separation.
-The entry point is `app/main.py` exposed via uvicorn.
+- Run the backend and Redis together when deploying with Docker Compose.
+- Set `GROQ_API_KEY`, `API_KEY`, `NEXT_PUBLIC_API_URL`, and `NEXT_PUBLIC_API_KEY` in your hosting environment.
+- Confirm the health endpoint before wiring the frontend.
+- The runtime has been slimmed to stay compatible with constrained platforms like Railway.
+
+Production verification:
+
+```bash
+# Backend health
+curl https://your-api-domain.com/health
+
+# Auth enforcement
+curl -X POST https://your-api-domain.com/api/document-analyze \
+  -H "Content-Type: application/json" \
+  -d '{"fileName":"x.pdf","fileType":"pdf","fileBase64":"eA=="}'
+
+# Frontend build
+cd frontend && npm run build
+```
 
 ## Project Structure
 
@@ -232,10 +214,10 @@ The entry point is `app/main.py` exposed via uvicorn.
 .
 ├── app/
 │   ├── extractors/
+│   ├── models/
 │   ├── processors/
 │   ├── routers/
 │   ├── services/
-│   ├── models/
 │   ├── utils/
 │   └── main.py
 ├── frontend/
@@ -247,83 +229,30 @@ The entry point is `app/main.py` exposed via uvicorn.
 └── docker-compose.yml
 ```
 
-## Environment Variables
-
-### Backend (.env)
-
-- `GROQ_API_KEY` (required)
-- `API_KEY` (required)
-- `REDIS_URL` (default: `redis://localhost:6379`)
-- `ENVIRONMENT` (default: `development`)
-- `LOG_LEVEL` (default: `INFO`)
-- `USE_CACHE` (default: `true`)
-- `USE_LOCAL_LLM` (default: `false`)
-- `LOCAL_LLM_URL` (default: `http://localhost:11434`)
-- `MAX_FILE_SIZE_MB` (default: `50`)
-- `REQUEST_TIMEOUT_SECONDS` (default: `300`)
-
-### Frontend (frontend/.env.local)
-
-- `NEXT_PUBLIC_API_URL`
-- `NEXT_PUBLIC_API_KEY`
-
-## Testing and Validation
-
-```bash
-python -m py_compile $(find app tests workers -name '*.py')
-pytest -q tests/test_api.py tests/test_entities.py tests/test_sentiment.py tests/test_extractors.py
-python run_sample_test.py
-```
-
-## Deployment Notes
-
-- Deploy backend container and Redis with Docker/compose
-- Set required secrets on hosting platform
-- Set frontend API URL and API key env vars
-- Verify health endpoint: `GET /health`
-
-Production verification checklist:
-
-```bash
-# 1) Backend health
-curl https://your-api-domain.com/health
-
-# 2) Auth enforcement (should be 401)
-curl -X POST https://your-api-domain.com/api/document-analyze \
-  -H "Content-Type: application/json" \
-  -d '{"fileName":"x.pdf","fileType":"pdf","fileBase64":"eA=="}'
-
-# 3) Frontend build check
-cd frontend && npm run build
-```
-
 ## Final Submission Checklist
 
-- [ ] Public GitHub repo URL added to submission form
-- [ ] Live deployment URL updated in README
-- [ ] `README.md`, `requirements.txt`, `.env.example`, and backend source are present
-- [ ] `.env` is not tracked by git
-- [ ] API key validation returns 401 for invalid/missing key
-- [ ] AI tools disclosure section is present
-- [ ] At least one successful API demo call is validated after deployment
+- [ ] GitHub repository URL added to the submission form.
+- [ ] Live deployment URLs updated in this README.
+- [ ] `.env` is not tracked by git.
+- [ ] Backend starts successfully with Docker Compose.
+- [ ] API key enforcement returns `401` when missing or invalid.
+- [ ] At least one successful end-to-end API demo is verified.
+- [ ] AI disclosure section remains present.
 
 ## AI Tools Used
 
-(Mandatory disclosure — required by hackathon rules)
+| Tool           | Purpose                                    |
+| -------------- | ------------------------------------------ |
+| GitHub Copilot | Implementation assistance and code edits   |
+| Claude         | Architecture review and technical strategy |
 
-| Tool               | Purpose                                                  |
-| ------------------ | -------------------------------------------------------- |
-| GitHub Copilot Pro | Code generation and implementation                       |
-| Claude (claude.ai) | Architecture design, model selection, technical strategy |
-
-All AI-generated code was reviewed, tested, and validated.
-Architecture decisions and system design were human-directed.
+All AI-assisted work was reviewed, tested, and validated before being kept.
 
 ## Known Limitations
 
-- Very large documents (>10,000 words) may have slower response
-- Handwritten text in images may have reduced OCR accuracy
-- Non-English documents not currently supported
+- Very large documents can take longer to analyze.
+- Handwritten text remains less reliable than printed text.
+- Non-English documents are not a primary target.
 
 ## License
 
