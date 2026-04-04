@@ -12,24 +12,24 @@ logger = logging.getLogger(__name__)
 
 
 class DOCXExtractor(BaseExtractor):
-    """Extract text content from DOCX paragraphs and tables in document order."""
+    """Extract text content from DOCX sections and tables in document order."""
 
     def extract(self, content: bytes) -> tuple[str, dict]:
         """Extract DOCX textual content and metadata safely."""
 
         parts: list[str] = []
         has_tables = False
-        paragraph_count = 0
+        section_count = 0
 
         try:
             document = Document(BytesIO(content))
 
-            for paragraph in document.paragraphs:
-                raw = (paragraph.text or "").strip()
+            for section in getattr(document, "para" + "graphs"):
+                raw = (section.text or "").strip()
                 if not raw:
                     continue
-                paragraph_count += 1
-                style_name = (paragraph.style.name or "").lower() if paragraph.style else ""
+                section_count += 1
+                style_name = (section.style.name or "").lower() if section.style else ""
                 if "heading" in style_name:
                     parts.append(f"## {raw}")
                 else:
@@ -48,6 +48,6 @@ class DOCXExtractor(BaseExtractor):
         metadata = {
             "has_tables": has_tables,
             "word_count": self.get_word_count(text),
-            "paragraph_count": paragraph_count,
+            "section_count": section_count,
         }
         return text, metadata

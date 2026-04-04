@@ -20,8 +20,6 @@ class EntitiesResponse(BaseModel):
     dates: List[str] = Field(default_factory=list)
     organizations: List[str] = Field(default_factory=list)
     amounts: List[str] = Field(default_factory=list)
-    emails: List[str] = Field(default_factory=list)
-    phones: List[str] = Field(default_factory=list)
 
 
 class AnalysisResponse(BaseModel):
@@ -29,28 +27,9 @@ class AnalysisResponse(BaseModel):
 
     status: str = "success"
     fileName: str
-    documentId: str | None = None
     summary: str
     entities: EntitiesResponse
     sentiment: Literal["Positive", "Neutral", "Negative"]
-
-
-class DocumentQuestionRequest(BaseModel):
-    """Input payload for document-scoped question answering."""
-
-    documentId: str
-    question: str = Field(min_length=3, max_length=1000)
-    topK: int = Field(default=4, ge=1, le=8)
-
-
-class DocumentQuestionResponse(BaseModel):
-    """Successful response for document-scoped question answering."""
-
-    status: str = "success"
-    documentId: str
-    question: str
-    answer: str
-    citations: List[str] = Field(default_factory=list)
 
 
 class ErrorResponse(BaseModel):

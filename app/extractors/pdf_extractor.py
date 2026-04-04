@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import fitz
 import pdfplumber
+import pytesseract
 from PIL import Image
 
 from app.extractors.base import BaseExtractor
@@ -16,18 +17,6 @@ logger = logging.getLogger(__name__)
 
 class PDFExtractor(BaseExtractor):
     """Extract PDF text with OCR support for scanned pages."""
-
-    _reader = None
-
-    @classmethod
-    def _get_reader(cls):
-        """Lazily initialize EasyOCR reader for scanned-page fallback."""
-
-        if cls._reader is None:
-            import easyocr
-
-            cls._reader = easyocr.Reader(["en"], gpu=False)
-        return cls._reader
 
     def extract(self, content: bytes) -> tuple[str, dict]:
         """Extract text and metadata from PDF bytes with robust fallback strategy."""
@@ -48,9 +37,7 @@ class PDFExtractor(BaseExtractor):
                         try:
                             pix = page_obj.get_pixmap(matrix=fitz.Matrix(2, 2))
                             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                            reader = self._get_reader()
-                            ocr_results: Any = reader.readtext(img, detail=1)
-                            ocr_text = " ".join(str(entry[1]) for entry in ocr_results)
+                            ocr_text = pytesseract.image_to_string(img, config="--oem 3 --psm 6")
                             if ocr_text.strip():
                                 page_text = ocr_text
                                 used_ocr = True

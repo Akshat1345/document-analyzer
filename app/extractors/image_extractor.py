@@ -1,74 +1,90 @@
-"""Image extraction pipeline using EasyOCR primary and pytesseract fallback."""
+"""
+Image text extractor using Tesseract OCR with intelligent
+preprocessing for varied image quality and document types.
+"""
 
-import logging
-from io import BytesIO
-from typing import Any
-
-import numpy as np
-import pytesseract
 from PIL import Image, ImageEnhance
-
+import pytesseract
+from io import BytesIO
 from app.extractors.base import BaseExtractor
 from app.utils.text_cleaner import clean_text
+import logging
 
 logger = logging.getLogger(__name__)
 
 
 class ImageExtractor(BaseExtractor):
-    """Extract text from image bytes with lightweight preprocessing."""
+    """
+    Extracts text from images using Tesseract OCR.
+    Applies contrast and sharpness enhancement before OCR.
+    Tries multiple page segmentation modes for best result.
+    """
 
-    _reader = None
+    def _preprocess(self, img: Image.Image) -> Image.Image:
+        """
+        Enhance image quality before OCR.
+        Handles small, low-contrast, and slightly blurry images.
+        """
+        img = img.convert("RGB")
+        w, h = img.size
 
-    @classmethod
-    def _get_reader(cls):
-        """Initialize and cache EasyOCR reader for English OCR."""
+        # Upscale small images - Tesseract performs poorly below 300px
+        if w < 300 or h < 300:
+            scale = max(300 / w, 300 / h, 2.0)
+            img = img.resize(
+                (int(w * scale), int(h * scale)),
+                Image.LANCZOS
+            )
 
-        if cls._reader is None:
-            import easyocr
+        # Boost contrast for faded or scan-quality images
+        img = ImageEnhance.Contrast(img).enhance(1.5)
 
-            cls._reader = easyocr.Reader(["en"], gpu=False)
-        return cls._reader
+        # Boost sharpness for slightly blurry images
+        img = ImageEnhance.Sharpness(img).enhance(1.5)
 
-    def _preprocess_image(self, img: Image.Image) -> Image.Image:
-        """Prepare image for OCR by normalizing mode, scale, and contrast."""
-
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-
-        width, height = img.size
-        if width < 300 or height < 300:
-            img = img.resize((width * 2, height * 2), Image.Resampling.LANCZOS)
-
-        enhancer = ImageEnhance.Contrast(img)
-        return enhancer.enhance(1.3)
+        return img
 
     def extract(self, content: bytes) -> tuple[str, dict]:
-        """Extract OCR text and metadata from image bytes with fallback behavior."""
-
-        text = ""
-        avg_confidence = 0.0
-        extraction_method = "easyocr"
-
+        """
+        Extract text from image bytes.
+        Tries PSM 6 -> PSM 3 -> PSM 11 for best result.
+        """
         try:
             img = Image.open(BytesIO(content))
-            img = self._preprocess_image(img)
+            img = self._preprocess(img)
 
-            reader = self._get_reader()
-            result: Any = reader.readtext(np.array(img), detail=1)
-            if result:
-                text = " ".join(str(entry[1]) for entry in result)
-                avg_confidence = sum(float(entry[2]) for entry in result) / len(result)
+            # PSM 6: uniform text block - best for clean documents
+            text = pytesseract.image_to_string(
+                img, config="--oem 3 --psm 6"
+            )
 
-            if avg_confidence < 0.6 or len(text.strip()) < 20:
-                extraction_method = "tesseract"
-                text = pytesseract.image_to_string(img, config="--oem 3 --psm 6")
-        except Exception as exc:
-            logger.warning("Image extraction failed: %s", exc)
+            # PSM 3: fully automatic - fallback for mixed layouts
+            if len(text.strip()) < 20:
+                text = pytesseract.image_to_string(
+                    img, config="--oem 3 --psm 3"
+                )
 
-        text = clean_text(text)
-        metadata = {
-            "word_count": self.get_word_count(text),
-            "extraction_method": extraction_method,
-            "avg_confidence": float(avg_confidence),
-        }
-        return text, metadata
+            # PSM 11: sparse text - last resort
+            if len(text.strip()) < 20:
+                text = pytesseract.image_to_string(
+                    img, config="--oem 3 --psm 11"
+                )
+
+            text = clean_text(text)
+            word_count = len(text.split())
+            logger.info(
+                "Image extraction complete: %d words via Tesseract",
+                word_count
+            )
+
+            return text, {
+                "word_count": word_count,
+                "extraction_method": "tesseract"
+            }
+
+        except Exception as e:
+            logger.error("Image extraction failed: %s", e)
+            return "", {
+                "word_count": 0,
+                "extraction_method": "failed"
+            }

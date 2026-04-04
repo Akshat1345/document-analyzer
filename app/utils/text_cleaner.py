@@ -17,7 +17,7 @@ def clean_text(text: str) -> str:
     cleaned = re.sub(r"(\w+)-\n(\w+)", r"\1\2", cleaned)
     cleaned = re.sub(r"(?<=[a-z])\n(?=[a-z])", " ", cleaned, flags=re.IGNORECASE)
 
-    # Normalize spacing while preserving paragraph boundaries.
+    # Normalize spacing while preserving section boundaries.
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
 

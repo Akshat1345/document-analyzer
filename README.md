@@ -21,21 +21,23 @@ Intelligent document processing API that accepts PDF, DOCX, and image files, ext
 
 ## Live Demo
 
-- Frontend URL: https://your-frontend-domain.com
-- API URL: https://your-api-domain.com
+- API URL: https://your-deployment.railway.app
+- Frontend: https://your-frontend.railway.app
+(Update these URLs after deployment)
 
 ## Tech Stack
 
 - Framework: FastAPI (Python 3.11)
-- NER: spaCy en_core_web_trf + GLiNER (zero-shot SOTA) + Llama 3.3 70B
-- Summarization: Llama 3.3 70B via Groq API (Chain-of-Density technique)
-- Sentiment: FinBERT + cardiffnlp/RoBERTa + VADER (weighted ensemble)
-- OCR: EasyOCR (primary) + Tesseract (fallback)
+- NER Layer 1: spaCy en_core_web_sm
+- NER Layer 2: Llama 3.3 70B via Groq API
+- Summarization: Llama 3.3 70B via Groq API (Chain-of-Density)
+- Sentiment: Llama 3.3 70B via Groq API + VADER ensemble
+- OCR: Tesseract (pytesseract) with multi-PSM fallback strategy
 - PDF: PyMuPDF + pdfplumber
 - DOCX: python-docx
 - Cache: Redis
 - Queue: Celery
-- Deploy: Docker + Railway
+- Deploy: Docker -> Railway / Render
 
 ## Setup Instructions
 
@@ -54,21 +56,16 @@ curl http://localhost:8000/health
 ## Approach
 
 - Text extraction strategy by file format:
-  - PDF: PyMuPDF parsing with pdfplumber fallback, plus OCR path for scanned pages
+  - PDF: PyMuPDF page-by-page with pdfplumber fallback, scanned pages auto-detected and sent to Tesseract OCR
   - DOCX: paragraph, heading, and table-aware extraction
-  - Image: EasyOCR primary pipeline with Tesseract fallback
-- Triple-layer NER strategy:
-  - spaCy detects standard entities with transformer context
-  - GLiNER catches domain-specific and zero-shot entities
-  - Llama 3.3 70B captures context-dependent entities
-  - All three are fused with fuzzy deduplication and false-positive filtering
+  - Image: Tesseract with contrast/sharpness preprocessing, tries PSM 6 -> PSM 3 -> PSM 11 for maximum coverage
+- NER strategy:
+  - Two-layer fusion (spaCy sm baseline + Llama 3.3 70B), merged with fuzzy deduplication
 - Sentiment strategy:
-  - Document category is classified first
-  - Weighted ensemble of FinBERT + RoBERTa + VADER is applied
-  - Weights are adjusted based on document type (for example, finance-heavy documents prioritize FinBERT)
+  - Llama 3.3 70B primary with document-type context prompt + VADER fallback
+  - Neutral-bias calibration for formal documents
 - Summary strategy:
-  - Chain-of-Density style prompting with entity anchoring
-  - Prompts are constrained for factual grounding and hallucination prevention
+  - Chain-of-Density prompting anchored to extracted entities for factual accuracy
 
 ## System Diagram
 
@@ -82,7 +79,7 @@ flowchart TD
     E{File Type}
     F[PDF Extractor<br/>PyMuPDF + pdfplumber]
     G[DOCX Extractor<br/>python-docx]
-    H[Image Extractor<br/>EasyOCR + Tesseract]
+    H[Image Extractor<br/>Tesseract]
     E -->|pdf| F
     E -->|docx| G
     E -->|image| H
@@ -96,8 +93,8 @@ flowchart TD
   I --> J[Document Classifier]
 
   subgraph Y[Analysis Layer]
-    K[NER Pipeline<br/>spaCy + GLiNER + Llama]
-    L[Sentiment Ensemble<br/>FinBERT + RoBERTa + VADER]
+    K[NER Pipeline<br/>spaCy + Llama]
+    L[Sentiment Ensemble<br/>Llama + VADER]
     M[Entity Fusion + Filters]
     N[Summary Generator<br/>Chain-of-Density]
   end
@@ -111,14 +108,6 @@ flowchart TD
   N --> P[Response Builder]
   O --> P
   P --> Q[JSON Response]
-
-  subgraph Z[RAG Indexing Layer]
-    R[Chunking + Embeddings]
-    S[Document-Scoped Vector Store]
-  end
-
-  I --> R
-  R --> S
 ```
 
 ## End-to-End Flowchart
@@ -136,26 +125,23 @@ flowchart TD
   AA -->|Yes| AC[Run NER and sentiment in parallel]
   AC --> AD[Generate summary]
   AD --> AE[Build success JSON]
-  AE --> AF[Index document for RAG]
-  AF --> AG[Return response]
+  AE --> AG[Return response]
 ```
 
 ## Core Capabilities
 
 - Multi-format ingestion: PDF, DOCX, JPG, JPEG, PNG
-- Entity extraction: names, dates, organizations, amounts, emails, phone numbers
+- Entity extraction: names, dates, organizations, amounts
 - Sentiment output strictly from: Positive, Neutral, Negative
 - Adaptive factual summarization
-- Document-scoped RAG Q&A with strict per-document retrieval isolation
 - Redis-backed caching and async worker support
 
 ## What Judges Should Evaluate First
 
 1. API authenticity: send different files and observe non-hardcoded, content-dependent outputs
 2. OCR resilience: test scanned/visual documents and compare extracted entities
-3. RAG isolation: ask document-specific questions and verify no cross-document contamination
-4. Error handling: test invalid API keys, invalid base64, and low-text files
-5. Operational readiness: verify Docker startup, health endpoint, and frontend integration
+3. Error handling: test invalid API keys, invalid base64, and low-text files
+4. Operational readiness: verify Docker startup, health endpoint, and frontend integration
 
 ## API Contracts
 
@@ -191,28 +177,6 @@ Missing or invalid API key returns 401.
     "dates": ["10 March 2026"],
     "organizations": ["ABC Pvt Ltd"],
     "amounts": ["₹10,000"]
-  },
-  "sentiment": "Neutral"
-}
-```
-
-### Current Implementation Response (Superset)
-
-To support production workflows, the implementation may include extra fields beyond the minimum spec shape, while still preserving all mandatory spec fields.
-
-```json
-{
-  "status": "success",
-  "fileName": "sample1.pdf",
-  "documentId": "<sha256-document-id>",
-  "summary": "...",
-  "entities": {
-    "names": ["Ravi Kumar"],
-    "dates": ["10 March 2026"],
-    "organizations": ["ABC Pvt Ltd"],
-    "amounts": ["₹10,000"],
-    "emails": ["ravi@example.com"],
-    "phones": ["+919876543210"]
   },
   "sentiment": "Neutral"
 }
@@ -255,87 +219,6 @@ curl -X POST https://your-deployment.railway.app/api/document-analyze \
   },
   "sentiment": "Positive"
 }
-```
-
-## Additional Endpoint (Project Extension)
-
-- Method: POST
-- Path: `/api/document-qa`
-- Purpose: Ask questions from a single indexed document context only
-
-Request body:
-
-```json
-{
-  "documentId": "<documentId-from-analyze-response>",
-  "question": "What is the current role?",
-  "topK": 4
-}
-```
-
-Response:
-
-```json
-{
-  "status": "success",
-  "documentId": "<sha256-document-id>",
-  "question": "What is the current role?",
-  "answer": "Senior Project Manager",
-  "citations": ["Chunk 1", "Chunk 2", "Chunk 4", "Chunk 3"]
-}
-```
-
-## Implemented Extensions Beyond Minimum Spec
-
-The official hackathon contract is fully honored, and the project also implements the following production-grade enhancements:
-
-- Analyze response enrichment for application workflow:
-  - `documentId` for deterministic per-document indexing and retrieval
-  - additional entity buckets: `emails` and `phones`
-- Document-scoped RAG system:
-  - automatic embedding generation after analysis
-  - chunk-level retrieval restricted to one `documentId` namespace
-  - citation list in QA response for transparency
-- Frontend dashboard improvements:
-  - drag-and-drop upload interface
-  - robust retry/error UX
-  - copy-JSON action
-  - integrated per-document Q&A panel
-- Extraction quality hardening:
-  - OCR artifact filtering for noisy entity candidates
-  - exact dedup for sensitive identifiers like email and phone
-  - broader phone format handling (international and spaced formats)
-- Reliability and ops hardening:
-  - Redis cache versioning and graceful fallback
-  - startup validation for required secrets
-  - CORS preflight handling for local and production
-  - Docker healthcheck and preloaded model startup
-
-## RAG Isolation Guarantee
-
-- Each analyzed document receives a unique `documentId`
-- Embeddings are stored per document namespace
-- Retrieval for Q&A is restricted to the requested `documentId` only
-- No global retrieval across other documents is used
-
-RAG Q&A request/answer sequence:
-
-```mermaid
-sequenceDiagram
-  participant C as Client
-  participant API as FastAPI
-  participant RS as RAG Service
-  participant VS as Vector Store
-  participant LLM as Llama 3.3 (Groq)
-
-  C->>API: POST /api/document-qa {documentId, question}
-  API->>RS: answer_question(documentId, question)
-  RS->>VS: load chunks/vectors for documentId only
-  VS-->>RS: top-k matching chunks
-  RS->>LLM: grounded prompt (question + chunks)
-  LLM-->>RS: answer
-  RS-->>API: answer + citations
-  API-->>C: JSON response
 ```
 
 ## Project Structure Note

@@ -9,7 +9,6 @@ from app.extractors.image_extractor import ImageExtractor
 from app.extractors.pdf_extractor import PDFExtractor
 from app.config import settings
 from app.models.schemas import AnalysisResponse, DocumentRequest, ErrorResponse
-from app.services import rag_service as rag_module
 from app.processors.document_classifier import DocumentClassifier
 from app.utils.helpers import compute_hash, decode_base64
 
@@ -41,9 +40,7 @@ class AnalysisPipeline:
             if settings.USE_CACHE:
                 cached = await self.cache.get(cache_key)
                 if cached:
-                    # Backward compatibility: older cache entries may miss documentId.
-                    if cached.get("documentId"):
-                        return AnalysisResponse(**cached)
+                    return AnalysisResponse(**cached)
 
             if request.fileType == "pdf":
                 extractor = PDFExtractor()
@@ -71,21 +68,10 @@ class AnalysisPipeline:
             response = AnalysisResponse(
                 status="success",
                 fileName=request.fileName,
-                documentId=content_hash,
                 summary=summary or "Summary unavailable.",
                 entities=entities,
                 sentiment=sentiment,
             )
-
-            if rag_module.rag_service_instance is not None:
-                try:
-                    await rag_module.rag_service_instance.index_document(
-                        document_id=content_hash,
-                        file_name=request.fileName,
-                        text=text,
-                    )
-                except Exception as exc:
-                    logger.warning("RAG indexing failed for %s: %s", request.fileName, exc)
 
             if settings.USE_CACHE:
                 await self.cache.set(cache_key, response.model_dump())

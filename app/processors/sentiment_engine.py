@@ -1,158 +1,162 @@
-"""Ensemble sentiment engine combining FinBERT, RoBERTa, and VADER."""
+"""
+Two-signal sentiment ensemble.
+Signal 1: Llama 3.3 70B via Groq - primary, full document context.
+Signal 2: VADER - reliable fallback, pure Python, always available.
+Document-type calibration prevents false positives on formal docs.
+"""
 
-from __future__ import annotations
-
-import logging
-from typing import Any
-
-from transformers import pipeline
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from app.services.groq_client import get_summary_from_claude
+import logging
 
 logger = logging.getLogger(__name__)
 
+VALID_SENTIMENTS = {"Positive", "Neutral", "Negative"}
+
+# These document types default to Neutral unless
+# there is strong signal pointing elsewhere
+NEUTRAL_BIASED = {"invoice", "contract", "academic"}
+
 
 class SentimentEngine:
-    """Document-type-aware sentiment inference using weighted model ensemble."""
+    """
+    Groq LLM primary + VADER fallback sentiment ensemble.
+    Returns exactly: 'Positive', 'Neutral', or 'Negative'.
+    """
 
-    _finbert: Any = None
-    _roberta: Any = None
-    _vader: Any = None
-    _initialized = False
-    _lock = None
-
-    WEIGHTS = {
-        "invoice": {"finbert": 0.6, "roberta": 0.2, "vader": 0.2},
-        "contract": {"finbert": 0.5, "roberta": 0.2, "vader": 0.3},
-        "financial_report": {"finbert": 0.6, "roberta": 0.2, "vader": 0.2},
-        "news_article": {"finbert": 0.2, "roberta": 0.5, "vader": 0.3},
-        "incident_report": {"finbert": 0.3, "roberta": 0.4, "vader": 0.3},
-        "resume": {"finbert": 0.2, "roberta": 0.5, "vader": 0.3},
-        "academic": {"finbert": 0.3, "roberta": 0.3, "vader": 0.4},
-        "general": {"finbert": 0.34, "roberta": 0.33, "vader": 0.33},
-    }
-
-    NEUTRAL_BIASED = {"invoice", "contract", "academic"}
+    _vader = None
 
     @classmethod
-    def initialize(cls) -> None:
-        """Load sentiment models once at startup with graceful fallbacks."""
+    def initialize(cls):
+        """
+        Initialize VADER at startup.
+        Pure Python, instant, no download needed.
+        """
+        cls._vader = SentimentIntensityAnalyzer()
+        logger.info("VADER sentiment analyzer initialized")
 
-        cls._ensure_initialized()
+    def _vader_sentiment(self, text: str) -> str:
+        """
+        VADER rule-based sentiment classification.
+        Used as fallback when Groq API is unavailable.
+        """
+        try:
+            compound = self._vader.polarity_scores(
+                text[:1000]
+            )["compound"]
+            if compound >= 0.05:
+                return "Positive"
+            elif compound <= -0.05:
+                return "Negative"
+            return "Neutral"
+        except Exception as e:
+            logger.warning("VADER error: %s", e)
+            return "Neutral"
 
-    @classmethod
-    def _ensure_initialized(cls) -> None:
-        """Load sentiment models lazily and only once."""
+    def _llm_sentiment(
+        self,
+        text: str,
+        doc_category: str
+    ) -> str | None:
+        """
+        Ask Llama 3.3 70B to classify sentiment.
+        Has full document context for accurate classification.
+        Returns None on failure so fallback can take over.
+        """
+        try:
+            prompt = f"""You are a precise sentiment classifier.
 
-        if cls._initialized:
-            return
+Classify the OVERALL sentiment of this {doc_category} document.
 
-        if cls._lock is None:
-            from threading import Lock
+CLASSIFICATION RULES:
+- Positive: growth, success, innovation, achievement,
+            improvement, profit, opportunity, benefit,
+            advancement, optimism
+- Negative: breach, attack, failure, crisis, damage,
+            threat, violation, loss, concern, declining,
+            warning, risk, problem
+- Neutral:  factual reporting, invoices, contracts,
+            academic research, technical documentation,
+            balanced news with no clear emotional tone
 
-            cls._lock = Lock()
+DOCUMENT TYPE DEFAULTS:
+- invoice / contract / academic paper -> Neutral by default
+  unless strongly emotional language is present
+- cybersecurity incident / breach / attack report -> Negative
+- technology innovation / business growth / success -> Positive
+- news article -> depends entirely on the content
 
-        with cls._lock:
-            if cls._initialized:
-                return
+Document type: {doc_category}
+Document text:
+{text[:2000]}
 
-            try:
-                cls._finbert = pipeline(
-                    "sentiment-analysis",
-                    model="ProsusAI/finbert",
-                    return_all_scores=True,
-                )
-            except Exception as exc:
-                logger.warning("Failed to load FinBERT: %s", exc)
-                cls._finbert = None
+Reply with EXACTLY ONE WORD.
+No punctuation. No explanation. No quotes.
+Valid options: Positive  Negative  Neutral
 
-            try:
-                cls._roberta = pipeline(
-                    "sentiment-analysis",
-                    model="cardiffnlp/twitter-roberta-base-sentiment-latest",
-                    return_all_scores=True,
-                )
-            except Exception as exc:
-                logger.warning("Failed to load RoBERTa: %s", exc)
-                cls._roberta = None
+Your classification:"""
 
-            try:
-                cls._vader = SentimentIntensityAnalyzer()
-            except Exception as exc:
-                logger.warning("Failed to load VADER: %s", exc)
-                cls._vader = None
+            raw = get_summary_from_claude(prompt)
+            if not raw:
+                return None
 
-            cls._initialized = True
+            # Clean response - LLM sometimes adds punctuation
+            cleaned = raw.strip().rstrip(".,!\"'").capitalize()
 
-    def _run_finbert(self, text: str) -> dict[str, float]:
-        """Run FinBERT and return normalized score dictionary."""
+            if cleaned in VALID_SENTIMENTS:
+                return cleaned
 
-        self._ensure_initialized()
-        if self._finbert is None:
-            return {"positive": 0.0, "neutral": 1.0, "negative": 0.0}
-        raw_scores: Any = self._finbert(text[:512])
-        scores = raw_scores[0]
-        out = {"positive": 0.0, "neutral": 0.0, "negative": 0.0}
-        for item in scores:
-            out[item["label"].lower()] = float(item["score"])
-        return out
+            # Handle variations in case LLM adds extra words
+            lower = cleaned.lower()
+            if "positive" in lower:
+                return "Positive"
+            if "negative" in lower:
+                return "Negative"
+            if "neutral" in lower:
+                return "Neutral"
 
-    def _run_roberta(self, text: str) -> dict[str, float]:
-        """Run RoBERTa and map label IDs to sentiment names."""
+            logger.warning(
+                "LLM returned unexpected sentiment: '%s'", raw
+            )
+            return None
 
-        self._ensure_initialized()
-        if self._roberta is None:
-            return {"positive": 0.0, "neutral": 1.0, "negative": 0.0}
-        raw_scores: Any = self._roberta(text[:512])
-        scores = raw_scores[0]
-        mapping = {"LABEL_0": "negative", "LABEL_1": "neutral", "LABEL_2": "positive"}
-        out = {"positive": 0.0, "neutral": 0.0, "negative": 0.0}
-        for item in scores:
-            out[mapping.get(item["label"], "neutral")] = float(item["score"])
-        return out
-
-    def _run_vader(self, text: str) -> dict[str, float | str]:
-        """Run VADER and return per-label scores plus coarse label."""
-
-        self._ensure_initialized()
-        if self._vader is None:
-            return {"positive": 0.0, "neutral": 1.0, "negative": 0.0, "label": "neutral"}
-        scores = self._vader.polarity_scores(text[:1000])
-        compound = scores["compound"]
-        if compound >= 0.05:
-            label = "positive"
-        elif compound <= -0.05:
-            label = "negative"
-        else:
-            label = "neutral"
-        return {
-            "positive": float(scores.get("pos", 0.0)),
-            "neutral": float(scores.get("neu", 0.0)),
-            "negative": float(scores.get("neg", 0.0)),
-            "label": label,
-        }
+        except Exception as e:
+            logger.warning("LLM sentiment error: %s", e)
+            return None
 
     def analyze(self, text: str, doc_category: str) -> str:
-        """Return final sentiment label as Positive, Neutral, or Negative."""
-
+        """
+        Main sentiment analysis method.
+        Runs both signals and resolves disagreements intelligently.
+        Always returns exactly: 'Positive', 'Neutral', or 'Negative'.
+        """
         try:
-            analysis_text = f"{text[:1000]} {text[-500:]}" if len(text) > 1000 else text
-            finbert_scores = self._run_finbert(analysis_text)
-            roberta_scores = self._run_roberta(analysis_text)
-            vader_scores = self._run_vader(analysis_text)
-            weights = self.WEIGHTS.get(doc_category, self.WEIGHTS["general"])
+            # VADER first - always works, no API dependency
+            vader_result = self._vader_sentiment(text)
 
-            weighted = {}
-            for label in ["positive", "neutral", "negative"]:
-                weighted[label] = (
-                    finbert_scores[label] * weights["finbert"]
-                    + roberta_scores[label] * weights["roberta"]
-                    + float(vader_scores[label]) * weights["vader"]
+            # LLM primary - more accurate with full context
+            llm_result = self._llm_sentiment(text, doc_category)
+
+            # LLM unavailable - fall back to VADER
+            if not llm_result:
+                logger.info(
+                    "LLM unavailable, using VADER: %s", vader_result
                 )
+                return vader_result
 
-            winner = max(weighted, key=lambda label: weighted[label])
-            if doc_category in self.NEUTRAL_BIASED and winner != "neutral" and weighted[winner] < 0.80:
-                winner = "neutral"
-            return winner.capitalize()
-        except Exception as exc:
-            logger.warning("Sentiment analysis failed: %s", exc)
+            # Both agree - high confidence
+            if llm_result == vader_result:
+                return llm_result
+
+            # Disagreement on formal document types -> prefer Neutral
+            if doc_category in NEUTRAL_BIASED:
+                if "Neutral" in [llm_result, vader_result]:
+                    return "Neutral"
+
+            # Default: trust LLM over VADER when they disagree
+            # LLM has full document context, VADER only first 1000 chars
+            return llm_result
+
+        except Exception as e:
+            logger.error("Sentiment analysis crashed: %s", e)
             return "Neutral"

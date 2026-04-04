@@ -12,10 +12,8 @@ from app.processors.ner_engine import NEREngine
 from app.processors.sentiment_engine import SentimentEngine
 from app.processors.summarizer import Summarizer
 from app.routers.analyze import router as analyze_router
-from app.routers.qa import router as qa_router
 from app.services.cache import CacheService
 from app.services import pipeline as pipeline_module
-from app.services.rag_service import RAGService, set_rag_service_instance
 from app.services.pipeline import AnalysisPipeline, set_pipeline_instance
 
 
@@ -42,9 +40,8 @@ async def lifespan(app: FastAPI):
     cache = CacheService()
     await cache.connect()
 
-    rag_service = RAGService()
-    await rag_service.connect()
-    set_rag_service_instance(rag_service)
+    NEREngine.initialize()
+    SentimentEngine.initialize()
 
     pipeline = AnalysisPipeline(
         ner_engine=NEREngine(),
@@ -56,7 +53,7 @@ async def lifespan(app: FastAPI):
         set_pipeline_instance(pipeline)
     app.state.models_loaded = True
 
-    logger.info("Application startup complete")
+    logger.info("All models initialized. Startup complete.")
     yield
     logger.info("Shutting down")
 
@@ -84,7 +81,6 @@ app.add_middleware(
 )
 
 app.include_router(analyze_router)
-app.include_router(qa_router)
 
 
 @app.get("/health")

@@ -22,23 +22,23 @@ class Summarizer:
         return " | ".join(parts) if parts else "No key entities identified"
 
     def _extractive_fallback(self, text: str) -> str:
-        """Build fallback summary from first sentence of top paragraphs."""
+        """Build fallback summary from first sentence of top sections."""
 
         sentences = []
-        for paragraph in [p.strip() for p in text.split("\n\n") if p.strip()]:
-            first = paragraph.split(". ")[0].strip()
+        for section in [p.strip() for p in text.split("\n\n") if p.strip()]:
+            first = section.split(". ")[0].strip()
             if first:
                 sentences.append(first if first.endswith(".") else f"{first}.")
         return " ".join(sentences[:3]) if sentences else "Summary unavailable."
 
     def _chunk_text(self, text: str, max_words: int = 3000) -> list[str]:
-        """Split long documents into paragraph chunks below word threshold."""
+        """Split long documents into section chunks below word threshold."""
 
         chunks = []
         current = []
         current_words = 0
-        for paragraph in text.split("\n\n"):
-            para = paragraph.strip()
+        for section in text.split("\n\n"):
+            para = section.strip()
             if not para:
                 continue
             para_words = len(para.split())

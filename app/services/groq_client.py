@@ -94,36 +94,3 @@ def get_summary_from_claude(prompt: str) -> str:
         return ""
 
 
-def get_rag_answer_from_context(question: str, context_chunks: list[str]) -> str:
-    """Answer strictly from provided document context chunks."""
-
-    context = "\n\n".join(context_chunks[:8])
-    try:
-        response_model: Any = None
-        resp = _client.chat.completions.create(
-            model=_model,
-            response_model=response_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a strict document QA assistant. "
-                        "Answer ONLY using the provided context from a single document. "
-                        "If the answer is not present, say: 'Not found in this document.' "
-                        "Do not use outside knowledge."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Question:\n{question}\n\n"
-                        f"Document Context:\n{context}\n\n"
-                        "Provide a concise factual answer."
-                    ),
-                },
-            ],
-        )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception as exc:
-        logger.error("RAG QA failed: %s", exc)
-        return ""
