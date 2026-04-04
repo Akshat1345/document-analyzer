@@ -7,14 +7,37 @@ Results are merged with fuzzy deduplication.
 
 import spacy
 import logging
+import re
 from app.models.schemas import EntitiesResponse
 from app.services.groq_client import get_entities_from_claude
 from app.processors.entity_normalizer import (
     deduplicate_fuzzy,
-    filter_false_positives
+    filter_false_positives,
+    normalize_amount,
+    normalize_date,
+    normalize_name,
+    normalize_organization,
 )
 
 logger = logging.getLogger(__name__)
+
+MONTH_PATTERN = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+DATE_PATTERNS = [
+    re.compile(rf"\b{MONTH_PATTERN}\s+\d{{4}}\b", re.IGNORECASE),
+    re.compile(rf"\b{MONTH_PATTERN}\s+\d{{1,2}},?\s+\d{{4}}\b", re.IGNORECASE),
+    re.compile(r"\b(?:19|20)\d{2}\b"),
+]
+AMOUNT_PATTERNS = [
+    re.compile(r"(?:[$₹€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?)"),
+    re.compile(r"\b\d+(?:\.\d+)?%\b"),
+    re.compile(r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b"),
+]
+ORG_CONTEXT_PATTERNS = [
+    re.compile(r"\b(?:at|with|from|in|for|worked\s+at|worked\s+with|joined)\s+([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,5})", re.IGNORECASE),
+    re.compile(r"\b((?:[A-Z][A-Za-z&.'-]+\s+){0,5}(?:Agency|Media|University|School|Institute|Company|Corp|Inc|Ltd|LLC|Group|Studio|Solutions|Systems|Labs|Consulting|Technology|Technologies|Services|Design|Designs|College|Center|Co))\b"),
+    re.compile(r"\b([A-Z][A-Za-z&.'-]+\s+School\s+of\s+[A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+)?)\b"),
+    re.compile(r"\b([A-Z][A-Za-z&.'-]+(?:\s+[A-Z][A-Za-z&.'-]+){0,4}\s+(?:of\s+)?(?:Design|Technology|Arts|Science|Business|Engineering))\b"),
+]
 
 
 class NEREngine:
@@ -109,10 +132,48 @@ class NEREngine:
                 spacy_r.get(field, []) +
                 llm_r.get(field, [])
             )
+            if field == "names":
+                combined = [normalize_name(v) for v in combined]
+            elif field == "dates":
+                combined = [normalize_date(v) for v in combined]
+            elif field == "organizations":
+                combined = [normalize_organization(v) for v in combined]
+            elif field == "amounts":
+                combined = [normalize_amount(v) for v in combined]
+
+            combined = [v for v in combined if v]
             combined = filter_false_positives(combined, field)
             combined = deduplicate_fuzzy(combined)
             merged[field] = combined
         return merged
+
+    def _extract_regex(self, text: str) -> dict:
+        """Extract high-confidence dates and amounts via regex fallback."""
+
+        out = {"names": [], "dates": [], "organizations": [], "amounts": []}
+        normalized_lines = [re.sub(r"\s+", " ", line.strip()) for line in text.splitlines() if line.strip()]
+        for pattern in DATE_PATTERNS:
+            for match in pattern.finditer(text):
+                out["dates"].append(match.group(0).strip())
+        for pattern in AMOUNT_PATTERNS:
+            for match in pattern.finditer(text):
+                out["amounts"].append(match.group(0).strip())
+        for pattern in ORG_CONTEXT_PATTERNS:
+            for line in normalized_lines:
+                for match in pattern.finditer(line):
+                    value = match.group(1).strip()
+                    if value:
+                        out["organizations"].append(value)
+                lowered_line = line.lower()
+                if any(keyword in lowered_line for keyword in ["agency", "media", "university", "school", "institute", "company", "corp", "inc", "ltd", "llc", "group", "studio", "solutions", "systems", "labs", "consulting", "technology", "technologies", "services"]):
+                    candidate = re.sub(r"^[^A-Z]*", "", line).strip(" ,;:-")
+                    if 2 <= len(candidate.split()) <= 8:
+                        out["organizations"].append(candidate)
+            for match in pattern.finditer(text):
+                value = match.group(1).strip()
+                if value:
+                    out["organizations"].append(value)
+        return out
 
     def extract_all(
         self,
@@ -125,5 +186,19 @@ class NEREngine:
         """
         spacy_result = self._extract_spacy(text)
         llm_result   = self._extract_llm(text)
-        merged       = self._merge(spacy_result, llm_result)
+        regex_result = self._extract_regex(text)
+        merged       = self._merge(
+            {
+                "names": spacy_result.get("names", []),
+                "dates": spacy_result.get("dates", []) + regex_result.get("dates", []),
+                "organizations": spacy_result.get("organizations", []) + regex_result.get("organizations", []),
+                "amounts": spacy_result.get("amounts", []) + regex_result.get("amounts", []),
+            },
+            {
+                "names": llm_result.get("names", []),
+                "dates": llm_result.get("dates", []),
+                "organizations": llm_result.get("organizations", []),
+                "amounts": llm_result.get("amounts", []),
+            },
+        )
         return EntitiesResponse(**merged)

@@ -1,18 +1,24 @@
 type EntityBadgesProps = {
   title: string;
-  values: string[];
+  values?: string[];
   className: string;
 };
 
-export default function EntityBadges({ title, values, className }: EntityBadgesProps) {
+export default function EntityBadges({
+  title,
+  values,
+  className,
+}: EntityBadgesProps) {
+  const safeValues = Array.isArray(values) ? values : [];
+
   return (
     <div className="entity-section">
       <h4>{title}</h4>
       <div className="badge-wrap">
-        {values.length === 0 ? (
+        {safeValues.length === 0 ? (
           <span className="none">None found</span>
         ) : (
-          values.map((value, idx) => (
+          safeValues.map((value, idx) => (
             <span key={`${value}-${idx}`} className={`badge ${className}`}>
               {value}
             </span>

@@ -15,8 +15,6 @@ type AnalysisResponse = {
     dates: string[];
     organizations: string[];
     amounts: string[];
-    emails: string[];
-    phones: string[];
   };
   sentiment: "Positive" | "Neutral" | "Negative";
 };

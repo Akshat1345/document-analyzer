@@ -16,7 +16,7 @@ export default function SentimentMeter({ sentiment }: SentimentMeterProps) {
         <span className="emoji">{config.emoji}</span>
         <span className="label">{sentiment}</span>
       </div>
-      <p className="footnote">Powered by FinBERT + RoBERTa + VADER ensemble</p>
+      <p className="footnote">Powered by Groq Llama + VADER ensemble</p>
     </div>
   );
 }

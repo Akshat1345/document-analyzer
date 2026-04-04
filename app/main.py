@@ -12,9 +12,11 @@ from app.processors.ner_engine import NEREngine
 from app.processors.sentiment_engine import SentimentEngine
 from app.processors.summarizer import Summarizer
 from app.routers.analyze import router as analyze_router
+from app.routers.qa import router as qa_router
 from app.services.cache import CacheService
 from app.services import pipeline as pipeline_module
 from app.services.pipeline import AnalysisPipeline, set_pipeline_instance
+from app.services.qa_service import QAService, set_qa_service_instance
 
 
 def _configure_logging() -> None:
@@ -49,6 +51,7 @@ async def lifespan(app: FastAPI):
         summarizer=Summarizer(),
         cache=cache,
     )
+    set_qa_service_instance(QAService(cache=cache))
     if pipeline_module.pipeline_instance is None:
         set_pipeline_instance(pipeline)
     app.state.models_loaded = True
@@ -81,6 +84,7 @@ app.add_middleware(
 )
 
 app.include_router(analyze_router)
+app.include_router(qa_router)
 
 
 @app.get("/health")

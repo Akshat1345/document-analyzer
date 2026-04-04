@@ -10,8 +10,6 @@ type AnalysisResponse = {
     dates: string[];
     organizations: string[];
     amounts: string[];
-    emails: string[];
-    phones: string[];
   };
   sentiment: "Positive" | "Neutral" | "Negative";
 };
@@ -48,16 +46,6 @@ export default function ResultCard({ result }: { result: AnalysisResponse }) {
           title="Amounts"
           values={result.entities.amounts}
           className="amount"
-        />
-        <EntityBadges
-          title="Emails"
-          values={result.entities.emails}
-          className="email"
-        />
-        <EntityBadges
-          title="Phone Numbers"
-          values={result.entities.phones}
-          className="phone"
         />
       </section>
 

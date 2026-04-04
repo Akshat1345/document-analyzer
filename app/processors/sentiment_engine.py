@@ -8,6 +8,7 @@ Document-type calibration prevents false positives on formal docs.
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from app.services.groq_client import get_summary_from_claude
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,50 @@ VALID_SENTIMENTS = {"Positive", "Neutral", "Negative"}
 # These document types default to Neutral unless
 # there is strong signal pointing elsewhere
 NEUTRAL_BIASED = {"invoice", "contract", "academic"}
+
+NEUTRAL_HINTS = {
+    "invoice",
+    "contract",
+    "agreement",
+    "terms",
+    "clause",
+    "receipt",
+    "technical",
+    "documentation",
+    "report",
+    "abstract",
+    "methodology",
+    "findings",
+}
+
+POSITIVE_HINTS = {
+    "excellent",
+    "outstanding",
+    "great",
+    "success",
+    "achievement",
+    "happy",
+}
+
+NEGATIVE_HINTS = {
+    "breach",
+    "attack",
+    "failure",
+    "loss",
+    "damage",
+    "critical",
+    "risk",
+}
+
+STRONG_SENTIMENT_TERMS = {
+    "excellent",
+    "outstanding",
+    "crisis",
+    "breach",
+    "disaster",
+    "severe",
+    "catastrophic",
+}
 
 
 class SentimentEngine:
@@ -124,6 +169,23 @@ Your classification:"""
             logger.warning("LLM sentiment error: %s", e)
             return None
 
+    def _looks_formal_or_factual(self, text: str, doc_category: str) -> bool:
+        """Return True when lexical signals suggest neutral formal writing."""
+
+        if doc_category in NEUTRAL_BIASED:
+            return True
+        lowered = text[:2500].lower()
+        neutral_hits = sum(1 for token in NEUTRAL_HINTS if token in lowered)
+        emotional_hits = sum(1 for token in POSITIVE_HINTS | NEGATIVE_HINTS if token in lowered)
+        punctuation_emphasis = len(re.findall(r"[!]{2,}", lowered))
+        return neutral_hits >= 2 and emotional_hits == 0 and punctuation_emphasis == 0
+
+    def _has_strong_sentiment_language(self, text: str) -> bool:
+        """Detect strong clearly-opinionated language in text snippet."""
+
+        lowered = text[:2500].lower()
+        return any(term in lowered for term in STRONG_SENTIMENT_TERMS)
+
     def analyze(self, text: str, doc_category: str) -> str:
         """
         Main sentiment analysis method.
@@ -133,6 +195,10 @@ Your classification:"""
         try:
             # VADER first - always works, no API dependency
             vader_result = self._vader_sentiment(text)
+
+            # Resumes are typically factual snapshots; keep neutral by default.
+            if doc_category == "resume" and not self._has_strong_sentiment_language(text):
+                return "Neutral"
 
             # LLM primary - more accurate with full context
             llm_result = self._llm_sentiment(text, doc_category)
@@ -151,6 +217,16 @@ Your classification:"""
             # Disagreement on formal document types -> prefer Neutral
             if doc_category in NEUTRAL_BIASED:
                 if "Neutral" in [llm_result, vader_result]:
+                    return "Neutral"
+
+            # Additional neutral guardrail for factual/formal text.
+            if self._looks_formal_or_factual(text, doc_category):
+                if "Neutral" in [llm_result, vader_result]:
+                    return "Neutral"
+
+            # Resume/general documents are often factual; avoid optimistic drift.
+            if doc_category in {"resume", "general"}:
+                if vader_result == "Neutral" and not self._has_strong_sentiment_language(text):
                     return "Neutral"
 
             # Default: trust LLM over VADER when they disagree

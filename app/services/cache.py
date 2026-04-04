@@ -34,6 +34,11 @@ class CacheService:
 
         return f"docuanalyze:v6:{content_hash}"
 
+    def build_doc_text_key(self, document_id: str) -> str:
+        """Return cache key for raw document text used by QA lookup."""
+
+        return f"docuanalyze:doctext:{document_id}"
+
     async def get(self, key: str) -> Optional[dict]:
         """Fetch JSON payload from cache or return None on misses/errors."""
 
@@ -56,3 +61,31 @@ class CacheService:
             await self._redis.setex(key, ttl, json.dumps(value))
         except Exception as exc:
             logger.warning("Cache set failed for key %s: %s", key, exc)
+
+    async def set_document_text(self, document_id: str, file_name: str, text: str, ttl: int = 86400) -> None:
+        """Store extracted document text for later document-scoped QA."""
+
+        if self._redis is None:
+            return
+        try:
+            payload = {
+                "documentId": document_id,
+                "fileName": file_name,
+                "text": text,
+            }
+            await self._redis.setex(self.build_doc_text_key(document_id), ttl, json.dumps(payload))
+        except Exception as exc:
+            logger.warning("Document text cache set failed for %s: %s", document_id, exc)
+
+    async def get_document_text(self, document_id: str) -> Optional[dict]:
+        """Fetch stored document text by document id."""
+
+        if self._redis is None:
+            return None
+        try:
+            raw = await self._redis.get(self.build_doc_text_key(document_id))
+            if not raw:
+                return None
+            return json.loads(raw)
+        except Exception:
+            return None

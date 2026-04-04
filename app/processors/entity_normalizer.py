@@ -42,6 +42,76 @@ COMMON_FALSE_NAME_WORDS = {
     "interal",
 }
 COMMON_GENERIC_ORG_WORDS = {"company", "organization", "agency", "institution", "limited", "inc", "ltd"}
+NAME_NOISE_TERMS = {
+    "software",
+    "excel",
+    "outlook",
+    "word",
+    "office",
+    "onenote",
+    "sharepoint",
+    "concur",
+    "catalyst",
+    "kronos",
+    "ultimate",
+    "uitimate",
+    "profile",
+    "work",
+    "experience",
+}
+ORG_NOISE_TERMS = {
+    "figma",
+    "adobe creative suite",
+    "graphic designer",
+    "skills",
+    "portfolio",
+    "interests",
+    "bachelor",
+    "fine arts",
+    "social media campaign",
+    "company corporate",
+    "corporate",
+}
+ORG_HINTS = {
+    "agency",
+    "media",
+    "school",
+    "university",
+    "college",
+    "institute",
+    "company",
+    "corp",
+    "corporate",
+    "inc",
+    "ltd",
+    "llc",
+    "group",
+    "bank",
+    "co",
+}
+ORG_ACTION_WORDS = {
+    "led",
+    "designed",
+    "managed",
+    "improved",
+    "boosted",
+    "created",
+    "developed",
+}
+ORG_ROLE_WORDS = {
+    "management",
+    "improvement",
+    "leadership",
+    "coordination",
+    "project",
+    "manager",
+    "designer",
+    "ceo",
+    "co-founder",
+    "founder",
+}
+LOCATION_TERMS = {"new york", "york", "city", "cty", "manhattan", "la"}
+MONTH_PATTERN = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
 
 
 def normalize_name(name: str) -> str:
@@ -58,13 +128,19 @@ def normalize_name(name: str) -> str:
     if len(normalized.split()) == 1 and lowered in {"inc", "ltd"}:
         return ""
     token_list = [token.strip(string.punctuation) for token in normalized.split() if token.strip(string.punctuation)]
-    if not (2 <= len(token_list) <= 4):
+    if not (2 <= len(token_list) <= 3):
         return ""
     if any(not re.fullmatch(r"[A-Za-z][A-Za-z'\-.]*", token) for token in token_list):
         return ""
 
     tokens = {token.strip(string.punctuation) for token in lowered.split()}
     if lowered in COMMON_FALSE_NAME_WORDS or tokens & COMMON_FALSE_NAME_WORDS:
+        return ""
+    if any(token.lower() in {"manager", "designer", "agency", "company", "profile", "skills"} for token in token_list):
+        return ""
+    if any(len(token) == 1 for token in token_list):
+        return ""
+    if any(token.lower() in NAME_NOISE_TERMS for token in token_list):
         return ""
     return normalized
 
@@ -73,6 +149,17 @@ def normalize_date(date: str) -> str:
     """Preserve source date format and reject orphaned year numbers."""
 
     normalized = date.strip()
+    lowered = normalized.lower()
+    if any(ch.isalpha() for ch in lowered):
+        months = {
+            "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+            "january", "february", "march", "april", "june", "july", "august", "september", "october", "november", "december",
+        }
+        words = re.findall(r"[a-zA-Z]+", lowered)
+        if words and not any(word in months for word in words):
+            return ""
+    if re.search(r"[a-zA-Z]\d|\d[a-zA-Z]", normalized):
+        return ""
     # Reject bare 4-digit numbers that don't look like years (1900-2099)
     if re.fullmatch(r"\d{4}", normalized):
         year_int = int(normalized)
@@ -85,6 +172,45 @@ def normalize_amount(amount: str) -> str:
     """Preserve source currency format with whitespace normalization only."""
 
     return amount.strip()
+
+
+def normalize_organization(org: str) -> str:
+    """Normalize organization and reject common non-organization phrases."""
+
+    normalized = re.sub(r"\s+", " ", org.strip().strip(string.punctuation))
+    lowered = normalized.lower()
+    if len(normalized) < 2:
+        return ""
+    if lowered in COMMON_GENERIC_ORG_WORDS or lowered in ORG_NOISE_TERMS:
+        return ""
+    if lowered.startswith("company ") and any(term in lowered for term in {"corporate", "profile", "project"}):
+        return ""
+    if len(normalized.split()) == 1 and lowered in {"co", "corp", "inc", "ltd", "llc"}:
+        return ""
+    if re.search(r"\d{3,}", normalized):
+        return ""
+    # Reject lines likely coming from OCR-garbled section headers.
+    if re.search(r"[{}<>|\\/]{2,}", normalized):
+        return ""
+    if any(word in lowered for word in ORG_ACTION_WORDS):
+        return ""
+    if any(word in lowered for word in ORG_ROLE_WORDS):
+        return ""
+    if any(term in lowered for term in NAME_NOISE_TERMS):
+        return ""
+    if any(term in lowered for term in LOCATION_TERMS) and len(normalized.split()) > 3:
+        return ""
+    # Keep compact title-cased names and common suffixes.
+    if len(normalized.split()) > 8:
+        return ""
+    words = [w for w in re.split(r"\s+", normalized) if w]
+    has_org_hint = any(hint in lowered for hint in ORG_HINTS)
+    title_words = sum(1 for w in words if re.fullmatch(r"[A-Z][A-Za-z&.'-]*", w) is not None)
+    if not has_org_hint:
+        return ""
+    if title_words < 1:
+        return ""
+    return normalized
 
 
 def deduplicate_fuzzy(items: list[str]) -> list[str]:
@@ -134,18 +260,58 @@ def filter_false_positives(entities: list[str], entity_type: str) -> list[str]:
             if any(ch.isdigit() for ch in value):
                 continue
             tokens = [t for t in re.split(r"\s+", value) if t]
-            if not (2 <= len(tokens) <= 4):
+            if not (2 <= len(tokens) <= 3):
                 continue
             if any(t.casefold() in COMMON_FALSE_NAME_WORDS for t in tokens):
+                continue
+            if any(t.lower() in {"manager", "designer", "agency", "company", "profile", "skills"} for t in tokens):
+                continue
+            if any(t.lower() in NAME_NOISE_TERMS for t in tokens):
                 continue
         elif entity_type == "organizations":
             if lowered in COMMON_GENERIC_ORG_WORDS:
                 continue
+            if lowered in ORG_NOISE_TERMS:
+                continue
+            if lowered.startswith("company ") and any(term in lowered for term in {"corporate", "profile", "project"}):
+                continue
+            if len(value.split()) == 1 and lowered in {"co", "corp", "inc", "ltd", "llc"}:
+                continue
+            if re.search(r"\d{3,}", value):
+                continue
+            if len(value.split()) > 8:
+                continue
+            if any(word in lowered for word in ORG_ACTION_WORDS):
+                continue
+            if any(word in lowered for word in ORG_ROLE_WORDS):
+                continue
+            if any(term in lowered for term in NAME_NOISE_TERMS):
+                continue
+            if any(term in lowered for term in LOCATION_TERMS) and len(value.split()) > 3:
+                continue
+            if value.isupper() and len(value) <= 8:
+                continue
         elif entity_type == "dates":
             if not any(ch.isdigit() for ch in value):
                 continue
+            # Reject phone/date mashups and overly noisy date spans.
+            if re.search(r"\d{3}[-\s]?\d{4}", value):
+                continue
+            if len(value) > 30:
+                continue
+            lowered_date = value.lower()
+            looks_like_month = re.search(MONTH_PATTERN, lowered_date) is not None
+            looks_like_numeric = re.search(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", value) is not None
+            looks_like_year = re.fullmatch(r"(?:19|20)\d{2}", value.strip()) is not None
+            if not (looks_like_month or looks_like_numeric or looks_like_year):
+                continue
         elif entity_type == "amounts":
             if not any(ch.isdigit() for ch in value):
+                continue
+            has_currency_or_percent = any(sym in value for sym in ["$", "₹", "€", "£", "%"])
+            has_grouped_amount = re.search(r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b", value) is not None
+            has_large_suffix = re.search(r"\b\d+(?:\.\d+)?\s*(?:k|m|b|thousand|million|billion)\b", value, re.IGNORECASE) is not None
+            if not (has_currency_or_percent or has_grouped_amount or has_large_suffix):
                 continue
         elif entity_type == "emails":
             if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", value):

@@ -68,9 +68,16 @@ class AnalysisPipeline:
             response = AnalysisResponse(
                 status="success",
                 fileName=request.fileName,
+                documentId=content_hash,
                 summary=summary or "Summary unavailable.",
                 entities=entities,
                 sentiment=sentiment,
+            )
+
+            await self.cache.set_document_text(
+                document_id=content_hash,
+                file_name=request.fileName,
+                text=text,
             )
 
             if settings.USE_CACHE:
