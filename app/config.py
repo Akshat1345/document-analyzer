@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     LOCAL_LLM_URL: str = "http://localhost:11434"
     MAX_FILE_SIZE_MB: int = 50
     REQUEST_TIMEOUT_SECONDS: int = 300
+    CORS_ORIGINS: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

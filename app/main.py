@@ -71,13 +71,19 @@ allowed_origins = [
     "http://127.0.0.1:8000",
     "http://localhost",
 ]
+extra_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+if extra_origins:
+    allowed_origins.extend(extra_origins)
+
+# Allow public Railway frontend domains (and similar hosted HTTPS domains) in production.
+cors_origin_regex = None
 if settings.ENVIRONMENT.lower() == "production":
-    # In production, allow deployed frontend in addition to localhost for quick ops checks.
-    allowed_origins.append("https://your-frontend-domain.com")
+    cors_origin_regex = r"https://.*\\.up\\.railway\\.app"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
