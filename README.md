@@ -31,10 +31,9 @@ The system accepts a base64-encoded document, extracts text with format-specific
 
 ## Live Demo
 
-- API URL: https://your-deployment.railway.app
-- Frontend URL: https://your-frontend.railway.app
-
-Update these after deployment.
+- API URL: https://document-analyzer-production-ce0c.up.railway.app
+- API Endpoint: https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze
+- Frontend URL: https://generous-dream-production-36d6.up.railway.app/
 
 ## Tech Stack
 
@@ -163,7 +162,7 @@ curl http://localhost:8000/health
 ### Example Request
 
 ```bash
-curl -X POST https://your-deployment.railway.app/api/document-analyze \
+curl -X POST https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze \
   -H "Content-Type: application/json" \
   -H "x-api-key: YOUR_API_KEY" \
   -d '{
@@ -197,10 +196,10 @@ Production verification:
 
 ```bash
 # Backend health
-curl https://your-api-domain.com/health
+curl https://document-analyzer-production-ce0c.up.railway.app/health
 
 # Auth enforcement
-curl -X POST https://your-api-domain.com/api/document-analyze \
+curl -X POST https://document-analyzer-production-ce0c.up.railway.app/api/document-analyze \
   -H "Content-Type: application/json" \
   -d '{"fileName":"x.pdf","fileType":"pdf","fileBase64":"eA=="}'
 
