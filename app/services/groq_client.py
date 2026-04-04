@@ -64,33 +64,100 @@ class ClaudeEntities(BaseModel):
 
 
 def get_entities_from_claude(text: str) -> ClaudeEntities:
-    """Extract entities from text with schema-constrained LLM output."""
-
+    """
+    Extract named entities using Llama 3.3 70B via Groq.
+    Uses a highly engineered prompt for maximum precision and recall.
+    Auto-retries are handled by the Instructor library internally.
+    """
     try:
-        excerpt = _build_document_excerpt(text)
         response = _client.chat.completions.create(
             model=_model,
-            response_format={"type": "json_object"},
-            temperature=0,
+            temperature=0.0,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are a precise document entity extractor. Extract ONLY entities "
-                        "explicitly present in the text. Never infer, guess, or use the document type. "
-                        "Ignore OCR-garbled tokens, partial words, section headers, and sentence fragments. "
-                        "For organizations: include only real organization names explicitly visible in the document, "
-                        "including companies, brands, institutions, universities, nonprofits, government bodies, "
-                        "hospitals, labs, and associations. Do not include vague descriptions or role titles. "
-                        "For dates: include only valid date-like expressions or years. "
-                        "For amounts: include only currency values or percentages. "
-                        "Return ONLY valid JSON with keys: names, dates, organizations, amounts. "
-                        "Use [] when a key has no values."
-                    ),
+                        "You are an expert Named Entity Recognition "
+                        "engine trained on millions of business, legal, "
+                        "financial, medical, and technical documents.\n\n"
+                        "YOUR MISSION: Extract named entities with "
+                        "PERFECT RECALL (miss nothing) and PERFECT "
+                        "PRECISION (add nothing that is not there).\n\n"
+                        "━━━ ENTITY DEFINITIONS ━━━\n\n"
+                        "NAMES — Full names of individual human beings "
+                        "only.\n"
+                        "  ✅ Include: 'Ravi Kumar', 'Nina Lane', "
+                        "'Tim Cook', 'Dr. Sarah Johnson'\n"
+                        "  ❌ Exclude: job titles alone ('CEO', "
+                        "'Manager'), pronouns ('he', 'she'), "
+                        "generic references ('the author', "
+                        "'the victim'), organisation names\n\n"
+                        "ORGANIZATIONS — Named companies, institutions, "
+                        "agencies, universities, banks, government "
+                        "bodies, NGOs, brands.\n"
+                        "  ✅ Include: 'Apple Inc.', 'Reserve Bank of "
+                        "India', 'Parsons School of Design', "
+                        "'Brightline Agency', 'Google', 'Microsoft', "
+                        "'NVIDIA'\n"
+                        "  ❌ Exclude: generic references ('the company',"
+                        " 'the bank', 'the institution'), "
+                        "unnamed entities\n\n"
+                        "DATES — All specific date references exactly "
+                        "as written in the source text.\n"
+                        "  ✅ Include: '10 March 2026', 'June 2020', "
+                        "'Q3 2024', 'March 2017', '2017', "
+                        "'May 2020 - Present'\n"
+                        "  ❌ Exclude: vague references with no "
+                        "specific time ('recently', 'last year', "
+                        "'in the past') unless a year is stated\n\n"
+                        "AMOUNTS — All monetary values with their "
+                        "currency symbol or code, exactly as written.\n"
+                        "  ✅ Include: '₹10,000', '$94.8 billion', "
+                        "'€500', 'USD 1.2M', '30%' (if financial "
+                        "percentage), '£2,500'\n"
+                        "  ❌ Exclude: plain numbers without currency "
+                        "context, percentages that are not monetary\n\n"
+                        "━━━ EXTRACTION RULES ━━━\n\n"
+                        "1. Read the ENTIRE text before extracting. "
+                        "Do not stop at the first mention.\n"
+                        "2. Extract entities from every part: "
+                        "headings, body, tables, footers, captions.\n"
+                        "3. Preserve original text exactly — "
+                        "do not correct spelling or reformat.\n"
+                        "4. Each unique entity appears ONCE per list "
+                        "— no duplicates.\n"
+                        "5. If a name appears multiple times "
+                        "(e.g. 'Tim Cook' and 'Cook') keep the "
+                        "most complete version only.\n"
+                        "6. Return empty list [] for any category "
+                        "where zero entities of that type exist.\n"
+                        "7. NEVER hallucinate. If unsure whether "
+                        "something is an entity: leave it out."
+                    )
                 },
-                {"role": "user", "content": f"Extract named entities from this document:\n\n{excerpt}"},
-            ],
+                {
+                    "role": "user",
+                    "content": (
+                        f"Extract all named entities from the text "
+                        f"below. Be exhaustive — miss nothing.\n\n"
+                        f"━━━ TEXT BEGIN ━━━\n"
+                        f"{text[:4000]}\n"
+                        f"━━━ TEXT END ━━━\n\n"
+                        f"Return a JSON object with exactly these "
+                        f"4 keys:\n"
+                        f"  names         → full person names only\n"
+                        f"  dates         → dates as written\n"
+                        f"  organizations → org/company/institution "
+                        f"names\n"
+                        f"  amounts       → monetary values with "
+                        f"currency\n\n"
+                        f"Extract every entity present. "
+                        f"Return empty lists where none exist."
+                    )
+                }
+            ]
         )
+        
         content = (response.choices[0].message.content or "").strip()
         if not content:
             return ClaudeEntities()
@@ -104,35 +171,49 @@ def get_entities_from_claude(text: str) -> ClaudeEntities:
             payload = json.loads(match.group(0))
 
         return ClaudeEntities.model_validate(payload)
-    except Exception as exc:
-        logger.error("Entity extraction failed: %s", exc)
+    except Exception as e:
+        logger.error("Entity extraction failed: %s", e)
         return ClaudeEntities()
 
 
 def get_summary_from_claude(prompt: str) -> str:
-    """Generate concise factual summary from prompt using configured LLM."""
-
+    """
+    Generate text using Llama 3.3 70B via Groq.
+    Used for both summarization and sentiment classification.
+    """
     try:
-        resp = _client.chat.completions.create(
+        response = _client.chat.completions.create(
             model=_model,
-            temperature=0,
+            response_format=None,
+            temperature=0.0,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are a precise document summarizer. "
-                        "Write exactly 2-4 dense factual sentences. "
-                        "Include key names, numbers, outcomes. "
-                        "Never start with 'This document'. "
-                        "Return ONLY the summary, nothing else."
-                    ),
+                        "You are a world-class document analyst, "
+                        "technical writer, and sentiment classifier. "
+                        "You produce factually precise outputs with "
+                        "zero hallucination. You follow every "
+                        "instruction exactly. You never add preamble, "
+                        "never explain your reasoning, never use "
+                        "filler language, and never deviate from "
+                        "the requested output format. When asked for "
+                        "one word, you return one word. When asked "
+                        "for a summary, you return only the summary."
+                    )
                 },
-                {"role": "user", "content": prompt},
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ],
         )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception as exc:
-        logger.error("Summarization failed: %s", exc)
+        result = response.choices[0].message.content
+        if result:
+            return result.strip()
+        return ""
+    except Exception as e:
+        logger.error("Groq API call failed: %s", e)
         return ""
 
 

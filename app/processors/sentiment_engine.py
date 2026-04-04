@@ -52,6 +52,19 @@ NEGATIVE_HINTS = {
     "risk",
 }
 
+NEGATIVE_EVENT_TERMS = {
+    "breach",
+    "attack",
+    "incident",
+    "fraud",
+    "outage",
+    "failure",
+    "lawsuit",
+    "penalty",
+    "violation",
+    "compromised",
+}
+
 STRONG_SENTIMENT_TERMS = {
     "excellent",
     "outstanding",
@@ -104,54 +117,96 @@ class SentimentEngine:
         doc_category: str
     ) -> str | None:
         """
-        Ask Llama 3.3 70B to classify sentiment.
-        Has full document context for accurate classification.
-        Returns None on failure so fallback can take over.
+        Primary sentiment classification using Llama 3.3 70B.
+        Uses document-type-aware prompting for maximum accuracy.
+        Returns None on failure — VADER fallback takes over.
         """
         try:
-            prompt = f"""You are a precise sentiment classifier.
+            # Use intro + conclusion for best sentiment signal
+            # Intro sets the tone, conclusion gives final verdict
+            if len(text) > 2000:
+                analysis_text = text[:1500] + "\n...\n" + text[-500:]
+            else:
+                analysis_text = text
 
-Classify the OVERALL sentiment of this {doc_category} document.
-
-CLASSIFICATION RULES:
-- Positive: growth, success, innovation, achievement,
-            improvement, profit, opportunity, benefit,
-            advancement, optimism
-- Negative: breach, attack, failure, crisis, damage,
-            threat, violation, loss, concern, declining,
-            warning, risk, problem
-- Neutral:  factual reporting, invoices, contracts,
-            academic research, technical documentation,
-            balanced news with no clear emotional tone
-
-DOCUMENT TYPE DEFAULTS:
-- invoice / contract / academic paper -> Neutral by default
-  unless strongly emotional language is present
-- cybersecurity incident / breach / attack report -> Negative
-- technology innovation / business growth / success -> Positive
-- news article -> depends entirely on the content
-
-Document type: {doc_category}
-Document text:
-{text[:2000]}
-
-Reply with EXACTLY ONE WORD.
-No punctuation. No explanation. No quotes.
-Valid options: Positive  Negative  Neutral
-
-Your classification:"""
+            prompt = (
+                f"You are a calibrated, expert sentiment classifier.\n\n"
+                f"━━━ YOUR TASK ━━━\n"
+                f"Classify the OVERALL sentiment of the document below "
+                f"as exactly one of: Positive, Negative, or Neutral.\n\n"
+                f"━━━ DEFINITIONS ━━━\n\n"
+                f"POSITIVE — The document's overall message is "
+                f"optimistic, successful, beneficial, or constructive. "
+                f"The reader comes away feeling informed about something "
+                f"good, growing, innovative, or achieved.\n"
+                f"Core signals: growth, success, innovation, "
+                f"achievement, improvement, profit, opportunity, "
+                f"advancement, record performance, breakthrough\n\n"
+                f"NEGATIVE — The document's overall message is "
+                f"alarming, harmful, failing, or concerning. "
+                f"The reader comes away feeling worried, warned, "
+                f"or informed about something bad that happened "
+                f"or could happen.\n"
+                f"Core signals: breach, attack, failure, crisis, "
+                f"damage, threat, violation, loss, fraud, declining, "
+                f"vulnerability, incident, unauthorized, compromised\n\n"
+                f"NEUTRAL — The document is factual, administrative, "
+                f"or informational with no clear emotional direction. "
+                f"It reports facts, obligations, or procedures without "
+                f"editorial tone or emotional language.\n"
+                f"Core signals: invoices, contracts, academic research, "
+                f"technical specifications, balanced reporting, "
+                f"procedural documents\n\n"
+                f"━━━ DECISION RULES BY DOCUMENT TYPE ━━━\n\n"
+                f"invoice → NEUTRAL (it is a billing document)\n"
+                f"contract → NEUTRAL (it is a legal agreement)\n"
+                f"academic → NEUTRAL (research is factual by default)\n"
+                f"resume/CV → POSITIVE (achievements and career focus)\n"
+                f"cybersecurity incident → NEGATIVE (breach = bad)\n"
+                f"data breach report → NEGATIVE always\n"
+                f"technology innovation article → POSITIVE\n"
+                f"AI advancement / research expansion → POSITIVE\n"
+                f"financial growth / record earnings → POSITIVE\n"
+                f"financial loss / fraud / scandal → NEGATIVE\n"
+                f"news article → judge by whether described "
+                f"events are good or bad for people involved\n\n"
+                f"━━━ CRITICAL RULE ━━━\n"
+                f"Base sentiment on the OVERALL document tone, not one "
+                f"sentence. A cybersecurity report recommending "
+                f"improvements is still NEGATIVE because it describes "
+                f"a breach. A document about AI risks is NEGATIVE. "
+                f"A document about AI benefits is POSITIVE.\n\n"
+                f"━━━ DOCUMENT ━━━\n"
+                f"Type: {doc_category}\n\n"
+                f"{analysis_text}\n\n"
+                f"━━━ YOUR RESPONSE ━━━\n"
+                f"Reply with EXACTLY ONE WORD.\n"
+                f"No punctuation. No explanation. No quotes. "
+                f"No preamble.\n"
+                f"The only valid responses are:\n"
+                f"Positive\n"
+                f"Negative\n"
+                f"Neutral\n\n"
+                f"Classification:"
+            )
 
             raw = get_summary_from_claude(prompt)
             if not raw:
                 return None
 
-            # Clean response - LLM sometimes adds punctuation
-            cleaned = raw.strip().rstrip(".,!\"'").capitalize()
+            # Clean and validate response
+            cleaned = raw.strip().rstrip(".,!\"'").strip()
 
+            # Direct match first
             if cleaned in VALID_SENTIMENTS:
                 return cleaned
 
-            # Handle variations in case LLM adds extra words
+            # Capitalize first letter and check again
+            capitalized = cleaned.capitalize()
+            if capitalized in VALID_SENTIMENTS:
+                return capitalized
+
+            # Substring match as last resort
             lower = cleaned.lower()
             if "positive" in lower:
                 return "Positive"
@@ -161,12 +216,12 @@ Your classification:"""
                 return "Neutral"
 
             logger.warning(
-                "LLM returned unexpected sentiment: '%s'", raw
+                "LLM returned unexpected sentiment value: '%s'", raw
             )
             return None
 
         except Exception as e:
-            logger.warning("LLM sentiment error: %s", e)
+            logger.warning("LLM sentiment call failed: %s", e)
             return None
 
     def _looks_formal_or_factual(self, text: str, doc_category: str) -> bool:
@@ -186,6 +241,24 @@ Your classification:"""
         lowered = text[:2500].lower()
         return any(term in lowered for term in STRONG_SENTIMENT_TERMS)
 
+    def _has_negative_event_language(self, text: str) -> bool:
+        """Detect explicit negative event terms that should override optimistic defaults."""
+
+        lowered = text[:2500].lower()
+        return any(term in lowered for term in NEGATIVE_EVENT_TERMS)
+
+    def _has_positive_tech_language(self, text: str) -> bool:
+        """Detect positive technology/growth indicators for tech documents."""
+
+        positive_tech_terms = {
+            "growth", "innovation", "breakthrough", "advancement",
+            "record", "success", "expand", "lead", "leader", "leading",
+            "achieve", "achievement", "improve", "improvement", "investment",
+            "research", "development", "ai", "artificial", "technology",
+        }
+        lowered = text[:2500].lower()
+        return sum(1 for term in positive_tech_terms if term in lowered) >= 3
+
     def analyze(self, text: str, doc_category: str) -> str:
         """
         Main sentiment analysis method.
@@ -196,9 +269,23 @@ Your classification:"""
             # VADER first - always works, no API dependency
             vader_result = self._vader_sentiment(text)
 
-            # Resumes are typically factual snapshots; keep neutral by default.
-            if doc_category == "resume" and not self._has_strong_sentiment_language(text):
+            # Technology/innovation documents with strong positive signals should be Positive
+            if self._has_positive_tech_language(text):
+                llm_result = self._llm_sentiment(text, doc_category)
+                if llm_result == "Positive":
+                    return "Positive"
+
+            # Formal categories are factual by default, unless they have positive tech signals
+            if doc_category in NEUTRAL_BIASED and not self._has_strong_sentiment_language(text) and not self._has_positive_tech_language(text):
                 return "Neutral"
+
+            # Incident and breach-style reports should remain negative by default.
+            if doc_category == "incident_report" or self._has_negative_event_language(text):
+                return "Negative"
+
+            # Resumes are achievement-focused unless they explicitly describe negative events.
+            if doc_category == "resume":
+                return "Positive"
 
             # LLM primary - more accurate with full context
             llm_result = self._llm_sentiment(text, doc_category)
@@ -224,8 +311,8 @@ Your classification:"""
                 if "Neutral" in [llm_result, vader_result]:
                     return "Neutral"
 
-            # Resume/general documents are often factual; avoid optimistic drift.
-            if doc_category in {"resume", "general"}:
+            # General documents are often factual; avoid optimistic drift when no strong sentiment exists.
+            if doc_category == "general":
                 if vader_result == "Neutral" and not self._has_strong_sentiment_language(text):
                     return "Neutral"
 
