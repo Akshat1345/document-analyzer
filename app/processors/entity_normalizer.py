@@ -323,6 +323,13 @@ def normalize_organization(org: str) -> str:
     """Normalize organization and reject common non-organization phrases."""
 
     normalized = re.sub(r"\s+", " ", org.strip().strip(string.punctuation))
+    # OCR resumes often prefix orgs with role titles; strip those while keeping the company tail.
+    normalized = re.sub(
+        r"^(?:(?:Senior|Junior|Lead|Principal|Associate)\s+)?(?:[A-Z][a-z]+\s+){0,3}(?:Designer|Engineer|Developer|Manager|Analyst|Consultant|Specialist|Coordinator|Officer|Executive)\s+",
+        "",
+        normalized,
+    )
+    normalized = re.sub(r"^(?:Experience|Phone|Contact|Role)\s+", "", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"^(?:and|or|the|a|an|for|from|in|at|with)\s+", "", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\s+(?:and|or|the|a|an)$", "", normalized, flags=re.IGNORECASE)
     lowered = normalized.lower()
